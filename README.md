@@ -2,6 +2,8 @@
 
 Official Golang execution layer implementation of the Ethereum protocol.
 
+This particular fork tries to implement a Proof of Concept for the hot/cold stateful deterministic wallet described in [IACR-2019-698](https://eprint.iacr.org/2019/698.pdf) by Poulami Das, Sebastian Faust and Julian Loss.
+
 [![API Reference](
 https://camo.githubusercontent.com/915b7be44ada53c290eb157634330494ebe3e30a/68747470733a2f2f676f646f632e6f72672f6769746875622e636f6d2f676f6c616e672f6764646f3f7374617475732e737667
 )](https://pkg.go.dev/github.com/ethereum/go-ethereum?tab=doc)
