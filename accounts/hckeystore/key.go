@@ -3,16 +3,34 @@ package hckeystore
 import (
 	"crypto/ecdsa"
 	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
 	"math/big"
+	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/ethereum/go-ethereum/accounts"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
-const keyLength int64 = 128
+const (
+	keyLength      = 128
+	version        = 1
+	KeyStoreScheme = "coldkeystore"
+)
+
+type keyStore interface {
+	GetKey(addr common.Address, filename string, auth string) (*ColdKey, error)
+
+	StoreKey(filename string, key *ColdKey, auth string) error
+
+	JoinPath(filename string) string
+}
 
 // ColdKey is the stateful keystore for the hot/cold wallet. It has a master
 // secret key, a master public key, an incremental ID and a state.
@@ -128,7 +146,38 @@ func (key ColdKey) CalculateHotKey() HotKey {
 	hotKey.State = &state
 	hotKey.CurrentDerivationID = &id
 
-	return coldKey, hotKey
+	return hotKey
+}
+
+func newKey(randomness io.Reader) (*ColdKey, *HotKey, error) {
+	state, err := rand.Int(randomness, math.BigPow(2, keyLength))
+	if err != nil {
+		return nil, nil, err
+	}
+
+	msk, err := ecdsa.GenerateKey(crypto.S256(), randomness)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	coldKey := ColdKey{
+		Address:             crypto.PubkeyToAddress(msk.PublicKey),
+		State:               state,
+		MasterSecretKey:     msk,
+		CurrentDerivationID: big.NewInt(0),
+	}
+
+	mpk := msk.PublicKey
+
+	hotState := *state
+	hotKey := HotKey{
+		Address:             crypto.PubkeyToAddress(mpk),
+		State:               &hotState,
+		MasterPublicKey:     &mpk,
+		CurrentDerivationID: big.NewInt(0),
+	}
+
+	return &coldKey, &hotKey, nil
 }
 
 // Creates a random ECDSA secret key from a master ECDSA secret key and an
@@ -239,18 +288,77 @@ func (key *HotKey) PKDer(id *big.Int) (sessionPublicKey *ecdsa.PublicKey) {
 	return sessionPublicKey
 }
 
-func (key *ColdKey) SignHash(account accounts.Account, hash []byte) ([]byte, error) {
-	return nil, nil
+func storeNewKey(keystore keyStore, rand io.Reader, passphrase string) (*ColdKey, accounts.Account, error) {
+	coldKey, _, err := newKey(rand)
+
+	if err != nil {
+		return nil, accounts.Account{}, err
+	}
+
+	a := accounts.Account{
+		Address: coldKey.Address,
+		URL:     accounts.URL{Scheme: KeyStoreScheme, Path: keystore.JoinPath(keyFileName(coldKey.Address))},
+	}
+
+	if err := keystore.StoreKey(a.URL.Path, coldKey, passphrase); err != nil {
+		zeroKey(coldKey.MasterSecretKey)
+		return nil, a, err
+	}
+
+	return coldKey, a, err
 }
 
-func (key *ColdKey) SignHashWithPassphrase(account accounts.Account, passphrase string, hash []byte) ([]byte, error) {
-	return nil, nil
+func keyFileName(keyAddr common.Address) string {
+	ts := time.Now().UTC()
+	return fmt.Sprintf("UTC--%s--%s", toISO8601(ts), hex.EncodeToString(keyAddr[:]))
 }
 
-func (key *ColdKey) SignTx(account accounts.Account, tx *types.Transaction, chainID *big.Int) (*types.Transaction, error) {
-	return nil, nil
+func writeTemporaryKeyFile(file string, content []byte) (string, error) {
+	// Create the keystore directory with appropriate permissions
+	// in case it is not present yet.
+	const dirPerm = 0700
+	if err := os.MkdirAll(filepath.Dir(file), dirPerm); err != nil {
+		return "", err
+	}
+	// Atomic write: create a temporary hidden file first
+	// then move it into place. TempFile assigns mode 0600.
+	f, err := os.CreateTemp(filepath.Dir(file), "."+filepath.Base(file)+".tmp")
+	if err != nil {
+		return "", err
+	}
+	if _, err := f.Write(content); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", err
+	}
+	f.Close()
+	return f.Name(), nil
 }
 
-func (key *ColdKey) SignTxWithPassphrase(account accounts.Account, passphrase string, tx *types.Transaction, chainID *big.Int) (*types.Transaction, error) {
-	return nil, nil
+func writeKeyFile(file string, content []byte) error {
+	name, err := writeTemporaryKeyFile(file, content)
+	if err != nil {
+		return err
+	}
+
+	return os.Rename(name, file)
+}
+
+func toISO8601(t time.Time) string {
+	var tz string
+	name, offset := t.Zone()
+	if name == "UTC" {
+		tz = "Z"
+	} else {
+		tz = fmt.Sprintf("%03d00", offset/3600)
+	}
+	return fmt.Sprintf("%04d-%02d-%02dT%02d-%02d-%02d.%09d%s",
+		t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), tz)
+}
+
+func zeroKey(k *ecdsa.PrivateKey) {
+	b := k.D.Bits()
+	for i := range b {
+		b[i] = 0
+	}
 }

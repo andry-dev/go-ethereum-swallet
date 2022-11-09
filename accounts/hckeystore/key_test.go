@@ -1,14 +1,17 @@
-package hckeystore_test
+package hckeystore
 
 import (
+	"crypto/rand"
 	"math/big"
 	"testing"
-
-	"github.com/ethereum/go-ethereum/accounts/hckeystore"
 )
 
 func TestSessionKeyDerivation(t *testing.T) {
-	coldKey, hotKey := hckeystore.Generate()
+	coldKey, hotKey, err := newKey(rand.Reader)
+
+	if err != nil {
+		t.Fatalf("Error occured during key generation")
+	}
 	id := big.NewInt(2)
 	sessionSecretKey := coldKey.SKDer(id)
 	sessionPublicKey := hotKey.PKDer(id)
@@ -17,9 +20,9 @@ func TestSessionKeyDerivation(t *testing.T) {
 		t.Fatalf("Mismatch in the state of the public and secret keys! Used ID: %v\n", id)
 	}
 
-	x1 := sessionSecretKey.X
+	x1 := sessionSecretKey.PrivateKey.X
 	x2 := sessionPublicKey.X
-	y1 := sessionSecretKey.Y
+	y1 := sessionSecretKey.PrivateKey.Y
 	y2 := sessionPublicKey.Y
 
 	t.Logf("Session Secret Key Point: (%v, %v)", x1, y1)
@@ -35,7 +38,12 @@ func TestSessionKeyDerivation(t *testing.T) {
 }
 
 func TestSessionSign(t *testing.T) {
-	coldKey, hotKey := hckeystore.Generate()
+	coldKey, hotKey, err := newKey(rand.Reader)
+
+	if err != nil {
+		t.Fatalf("Error during key generation")
+	}
+
 	id := big.NewInt(2)
 
 	sessionSecretKey := coldKey.SKDer(id)
@@ -45,12 +53,12 @@ func TestSessionSign(t *testing.T) {
 
 	t.Logf("Message: %v", message)
 
-	nonce, sig := hckeystore.SessionSign(sessionSecretKey, message)
+	nonce, sig := SessionSign(sessionSecretKey, message)
 
 	t.Logf("Nonce: %v", nonce)
 	t.Logf("Signature: %v", sig)
 
-	res := hckeystore.SessionVerify(sessionPublicKey, nonce, sig, message)
+	res := SessionVerify(sessionPublicKey, nonce, sig, message)
 
 	if !res {
 		t.Fatal("Signature mismatch!")
@@ -58,7 +66,11 @@ func TestSessionSign(t *testing.T) {
 }
 
 func TestWrongSessionKeyShouldFailVerification(t *testing.T) {
-	coldKey, hotKey := hckeystore.Generate()
+	coldKey, hotKey, err := newKey(rand.Reader)
+
+	if err != nil {
+		t.Fatalf("Error during key generation")
+	}
 
 	id1 := big.NewInt(2)
 	id2 := big.NewInt(3)
@@ -70,7 +82,7 @@ func TestWrongSessionKeyShouldFailVerification(t *testing.T) {
 		t.Fatalf("Different session identifiers resulted in the same state.\nUsed ids: %v, %v", id1, id2)
 	}
 
-	x1 := sessionSecretKey.X
+	x1 := sessionSecretKey.PrivateKey.X
 	x2 := sessionPublicKey.X
 
 	if x1.Cmp(x2) == 0 {
@@ -81,12 +93,12 @@ func TestWrongSessionKeyShouldFailVerification(t *testing.T) {
 
 	t.Logf("Message: %v", message)
 
-	nonce, sig := hckeystore.SessionSign(sessionSecretKey, message)
+	nonce, sig := SessionSign(sessionSecretKey, message)
 
 	t.Logf("Nonce: %v", nonce)
 	t.Logf("Signature: %v", sig)
 
-	res := hckeystore.SessionVerify(sessionPublicKey, nonce, sig, message)
+	res := SessionVerify(sessionPublicKey, nonce, sig, message)
 
 	if res {
 		t.Fatal("Signature matched with different session keys.")
