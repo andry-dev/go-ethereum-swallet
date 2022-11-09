@@ -17,47 +17,116 @@ const keyLength int64 = 128
 // ColdKey is the stateful keystore for the hot/cold wallet. It has a master
 // secret key, a master public key, an incremental ID and a state.
 type ColdKey struct {
+	Address         common.Address
 	MasterSecretKey *ecdsa.PrivateKey
 	State           *big.Int
-	ID              *big.Int
+
+	// The current identifier used to derive the current session private key.
+	// Needs to be synced with the hot wallet.
+	CurrentDerivationID *big.Int
 }
 
 type HotKey struct {
+	Address         common.Address
 	MasterPublicKey *ecdsa.PublicKey
 	State           *big.Int
-	ID              *big.Int
+
+	// The current identifier used to derive the current session secret key.
+	// Needs to be synced with the hot wallet.
+	CurrentDerivationID *big.Int
+}
+
+type SessionKey struct {
+	Address    common.Address
+	PrivateKey *ecdsa.PrivateKey
+}
+
+type plainColdKeyJSON struct {
+	Address             string `json:"address"`
+	PrivateKey          string `json:"privatekey"`
+	State               string `json:"state"`
+	CurrentDerivationID string `json:"derivationid"`
+	Version             int    `json:"version"`
+}
+
+type plainHotKeyJSON struct {
+	Address             string `json:"address"`
+	PublicKey           string `json:"publickey"`
+	State               string `json:"state"`
+	CurrentDerivationID string `json:"derivationid"`
+	Version             int    `json:"version"`
 }
 
 func (key *HotKey) String() string {
-	return fmt.Sprintf("{mpk=%v, state=0x%v, id=0x%v}\n", key.MasterPublicKey, key.State.Text(16), key.ID.Text(16))
+	return fmt.Sprintf("{mpk=%v, state=0x%v, id=0x%v}\n", key.MasterPublicKey, key.State.Text(16), key.CurrentDerivationID.Text(16))
 }
 
 func (key *ColdKey) String() string {
-	return fmt.Sprintf("{msk=%v, state=0x%v, id=0x%v}\n", key.MasterSecretKey.D, key.State.Text(16), key.ID.Text(16))
+	return fmt.Sprintf("{msk=%v, state=0x%v, id=0x%v}\n", key.MasterSecretKey.D, key.State.Text(16), key.CurrentDerivationID.Text(16))
 }
 
-func Generate() (ColdKey, HotKey) {
-	state, err := rand.Int(rand.Reader, math.BigPow(2, keyLength))
-	if err != nil {
-		panic(err)
+func (key *ColdKey) MarshalJSON() (j []byte, err error) {
+	jsonStruct := plainColdKeyJSON{
+		Address:             hex.EncodeToString(key.Address[:]),
+		PrivateKey:          hex.EncodeToString(crypto.FromECDSA(key.MasterSecretKey)),
+		State:               hex.EncodeToString(key.State.Bytes()),
+		CurrentDerivationID: hex.EncodeToString(key.CurrentDerivationID.Bytes()),
+		Version:             version,
 	}
 
-	msk, err := crypto.GenerateKey()
+	j, err = json.Marshal(jsonStruct)
+	return j, err
+
+}
+
+func (key *ColdKey) UnmarshalJSON(j []byte) (err error) {
+	keyJSON := new(plainColdKeyJSON)
+	err = json.Unmarshal(j, &keyJSON)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
-	coldKey := ColdKey{}
-	coldKey.State = state
-	coldKey.MasterSecretKey = msk
-	coldKey.ID = big.NewInt(0)
+	addr, err := hex.DecodeString(keyJSON.Address)
+	if err != nil {
+		return err
+	}
 
-	mpk := msk.PublicKey
-	hotState := *state
+	privateKey, err := crypto.HexToECDSA(keyJSON.PrivateKey)
+	if err != nil {
+		return err
+	}
+
+	state, err := hex.DecodeString(keyJSON.State)
+	if err != nil {
+		return err
+	}
+
+	currentID, err := hex.DecodeString(keyJSON.CurrentDerivationID)
+	if err != nil {
+		return err
+	}
+
+	key.Address = common.BytesToAddress(addr)
+	key.MasterSecretKey = privateKey
+	key.State = big.NewInt(0).SetBytes(state)
+	key.CurrentDerivationID = big.NewInt(0).SetBytes(currentID)
+
+	return nil
+
+}
+
+// Calculates an equivalent hot key for the current cold key.
+// All the fields from the cold key are copied to avoid incidental data
+// structures.
+func (key ColdKey) CalculateHotKey() HotKey {
 	hotKey := HotKey{}
-	hotKey.State = &hotState
+
+	mpk := key.MasterSecretKey.PublicKey
+	state := *key.State
+	id := *key.CurrentDerivationID
 	hotKey.MasterPublicKey = &mpk
-	hotKey.ID = big.NewInt(0)
+	hotKey.State = &state
+	hotKey.CurrentDerivationID = &id
 
 	return coldKey, hotKey
 }
@@ -99,17 +168,17 @@ func sessionMessageHash(pk *ecdsa.PublicKey, nonce *big.Int, message []byte) []b
 // RandSecretKey.
 //
 // Returns a pair composed of a nonce and the signature.
-func SessionSign(sessionSecretKey *ecdsa.PrivateKey, message []byte) (nonce *big.Int, sig []byte) {
+func SessionSign(sessionSecretKey *SessionKey, message []byte) (nonce *big.Int, sig []byte) {
 	nonce, err := rand.Int(rand.Reader, math.BigPow(2, keyLength))
 	if err != nil {
 		panic(err)
 	}
 
-	pk := &sessionSecretKey.PublicKey
+	pk := &sessionSecretKey.PrivateKey.PublicKey
 
 	message = sessionMessageHash(pk, nonce, message)
 
-	sig, err = crypto.Sign(message, sessionSecretKey)
+	sig, err = crypto.Sign(message, sessionSecretKey.PrivateKey)
 	if err != nil {
 		panic(err)
 	}
@@ -136,8 +205,8 @@ func bigIntFromBytes(b []byte) *big.Int {
 
 // Derives a session secret key for session identifier id.
 //
-// Returns the generated session secret key and the new state.
-func (key *ColdKey) SKDer(id *big.Int) (sessionSecretKey *ecdsa.PrivateKey) {
+// Returns the generated session secret key.
+func (key *ColdKey) SKDer(id *big.Int) *SessionKey {
 	blob := crypto.Keccak256(key.State.Bytes(), id.Bytes())
 	randID, newState := bigIntFromBytes(blob[:16]), bigIntFromBytes(blob[16:])
 
@@ -146,22 +215,25 @@ func (key *ColdKey) SKDer(id *big.Int) (sessionSecretKey *ecdsa.PrivateKey) {
 		panic(err)
 	}
 
-	key.ID = id
+	key.CurrentDerivationID = id
 	key.State = newState
 
-	return sessionSecretKey
+	return &SessionKey{
+		Address:    crypto.PubkeyToAddress(sessionSecretKey.PublicKey),
+		PrivateKey: sessionSecretKey,
+	}
 }
 
 // Derives a session public key for session identifier id.
 //
-// Returns the generated session public key and the new state.
+// Returns the generated session public key.
 func (key *HotKey) PKDer(id *big.Int) (sessionPublicKey *ecdsa.PublicKey) {
 	blob := crypto.Keccak256(key.State.Bytes(), id.Bytes())
 	randID, newState := bigIntFromBytes(blob[:16]), bigIntFromBytes(blob[16:])
 
 	sessionPublicKey = RandPublicKey(key.MasterPublicKey, randID)
 
-	key.ID = id
+	key.CurrentDerivationID = id
 	key.State = newState
 
 	return sessionPublicKey
