@@ -52,7 +52,7 @@ func NewTransactor(keyin io.Reader, passphrase string) (*TransactOpts, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewKeyedTransactor(key.PrivateKey), nil
+	return NewKeyedTransactor(key.MasterPrivateKey), nil
 }
 
 // NewKeyStoreTransactor is a utility method to easily create a transaction signer from
@@ -113,7 +113,7 @@ func NewTransactorWithChainID(keyin io.Reader, passphrase string, chainID *big.I
 	if err != nil {
 		return nil, err
 	}
-	return NewKeyedTransactorWithChainID(key.PrivateKey, chainID)
+	return NewKeyedTransactorWithChainID(key.MasterPrivateKey, chainID)
 }
 
 // NewKeyStoreTransactorWithChainID is a utility method to easily create a transaction signer from

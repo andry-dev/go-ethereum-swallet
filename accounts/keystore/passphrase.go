@@ -79,7 +79,7 @@ type keyStorePassphrase struct {
 	skipKeyFileVerification bool
 }
 
-func (ks keyStorePassphrase) GetKey(addr common.Address, filename, auth string) (*Key, error) {
+func (ks keyStorePassphrase) GetKey(addr common.Address, filename, auth string) (*ColdKey, error) {
 	// Load the key from the keystore and decrypt its contents
 	keyjson, err := os.ReadFile(filename)
 	if err != nil {
@@ -102,7 +102,7 @@ func StoreKey(dir, auth string, scryptN, scryptP int) (accounts.Account, error) 
 	return a, err
 }
 
-func (ks keyStorePassphrase) StoreKey(filename string, key *Key, auth string) error {
+func (ks keyStorePassphrase) StoreKey(filename string, key *ColdKey, auth string) error {
 	keyjson, err := EncryptKey(key, auth, ks.scryptN, ks.scryptP)
 	if err != nil {
 		return err
@@ -181,23 +181,25 @@ func EncryptDataV3(data, auth []byte, scryptN, scryptP int) (CryptoJSON, error) 
 
 // EncryptKey encrypts a key using the specified scrypt parameters into a json
 // blob that can be decrypted later on.
-func EncryptKey(key *Key, auth string, scryptN, scryptP int) ([]byte, error) {
-	keyBytes := math.PaddedBigBytes(key.PrivateKey.D, 32)
+func EncryptKey(key *ColdKey, auth string, scryptN, scryptP int) ([]byte, error) {
+	keyBytes := math.PaddedBigBytes(key.MasterPrivateKey.D, 32)
 	cryptoStruct, err := EncryptDataV3(keyBytes, []byte(auth), scryptN, scryptP)
 	if err != nil {
 		return nil, err
 	}
-	encryptedKeyJSONV3 := encryptedKeyJSONV3{
+	encryptedKeyJSONV3 := encryptedColdKeyJSONV3{
 		hex.EncodeToString(key.Address[:]),
 		cryptoStruct,
 		key.Id.String(),
+		hex.EncodeToString(key.State.Bytes()),
+		hex.EncodeToString(key.CurrentDerivation.Bytes()),
 		version,
 	}
 	return json.Marshal(encryptedKeyJSONV3)
 }
 
 // DecryptKey decrypts a key from a json blob, returning the private key itself.
-func DecryptKey(keyjson []byte, auth string) (*Key, error) {
+func DecryptKey(keyjson []byte, auth string) (*ColdKey, error) {
 	// Parse the json into a simple map to fetch the key version
 	m := make(map[string]interface{})
 	if err := json.Unmarshal(keyjson, &m); err != nil {
@@ -215,7 +217,7 @@ func DecryptKey(keyjson []byte, auth string) (*Key, error) {
 		}
 		keyBytes, keyId, err = decryptKeyV1(k, auth)
 	} else {
-		k := new(encryptedKeyJSONV3)
+		k := new(encryptedColdKeyJSONV3)
 		if err := json.Unmarshal(keyjson, k); err != nil {
 			return nil, err
 		}
@@ -230,10 +232,10 @@ func DecryptKey(keyjson []byte, auth string) (*Key, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Key{
-		Id:         id,
-		Address:    crypto.PubkeyToAddress(key.PublicKey),
-		PrivateKey: key,
+	return &ColdKey{
+		Id:               id,
+		Address:          crypto.PubkeyToAddress(key.PublicKey),
+		MasterPrivateKey: key,
 	}, nil
 }
 
@@ -273,7 +275,7 @@ func DecryptDataV3(cryptoJson CryptoJSON, auth string) ([]byte, error) {
 	return plainText, err
 }
 
-func decryptKeyV3(keyProtected *encryptedKeyJSONV3, auth string) (keyBytes []byte, keyId []byte, err error) {
+func decryptKeyV3(keyProtected *encryptedColdKeyJSONV3, auth string) (keyBytes []byte, keyId []byte, err error) {
 	if keyProtected.Version != version {
 		return nil, nil, fmt.Errorf("version not supported: %v", keyProtected.Version)
 	}

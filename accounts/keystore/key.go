@@ -19,10 +19,12 @@ package keystore
 import (
 	"bytes"
 	"crypto/ecdsa"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,44 +32,67 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/google/uuid"
 )
 
 const (
-	version = 3
+	version   = 3
+	keyLength = 128
 )
 
-type Key struct {
+type ColdKey struct {
 	Id uuid.UUID // Version 4 "random" for unique id not derived from key data
 	// to simplify lookups we also store the address
 	Address common.Address
 	// we only store privkey as pubkey/address can be derived from it
 	// privkey in this struct is always in plaintext
+	MasterPrivateKey *ecdsa.PrivateKey
+
+	State             *big.Int
+	CurrentDerivation *big.Int
+}
+
+type HotKey struct {
+	Id                uuid.UUID
+	Address           common.Address
+	MasterPublicKey   *ecdsa.PublicKey
+	State             *big.Int
+	CurrentDerivation *big.Int
+}
+
+type SessionKey struct {
+	Id         uuid.UUID
+	Address    common.Address
 	PrivateKey *ecdsa.PrivateKey
 }
 
 type keyStore interface {
 	// Loads and decrypts the key from disk.
-	GetKey(addr common.Address, filename string, auth string) (*Key, error)
+	GetKey(addr common.Address, filename string, auth string) (*ColdKey, error)
 	// Writes and encrypts the key.
-	StoreKey(filename string, k *Key, auth string) error
+	StoreKey(filename string, k *ColdKey, auth string) error
 	// Joins filename with the key directory unless it is already absolute.
 	JoinPath(filename string) string
 }
 
-type plainKeyJSON struct {
-	Address    string `json:"address"`
-	PrivateKey string `json:"privatekey"`
-	Id         string `json:"id"`
-	Version    int    `json:"version"`
+type plainColdKeyJSON struct {
+	Address           string `json:"address"`
+	PrivateKey        string `json:"privatekey"`
+	Id                string `json:"id"`
+	State             string `json:"state"`
+	CurrentDerivation string `json:"derivation"`
+	Version           int    `json:"version"`
 }
 
-type encryptedKeyJSONV3 struct {
-	Address string     `json:"address"`
-	Crypto  CryptoJSON `json:"crypto"`
-	Id      string     `json:"id"`
-	Version int        `json:"version"`
+type encryptedColdKeyJSONV3 struct {
+	Address           string     `json:"address"`
+	Crypto            CryptoJSON `json:"crypto"`
+	Id                string     `json:"id"`
+	State             string     `json:"state"`
+	CurrentDerivation string     `json:"derivation"`
+	Version           int        `json:"version"`
 }
 
 type encryptedKeyJSONV1 struct {
@@ -90,19 +115,21 @@ type cipherparamsJSON struct {
 	IV string `json:"iv"`
 }
 
-func (k *Key) MarshalJSON() (j []byte, err error) {
-	jStruct := plainKeyJSON{
+func (k *ColdKey) MarshalJSON() (j []byte, err error) {
+	jStruct := plainColdKeyJSON{
 		hex.EncodeToString(k.Address[:]),
-		hex.EncodeToString(crypto.FromECDSA(k.PrivateKey)),
+		hex.EncodeToString(crypto.FromECDSA(k.MasterPrivateKey)),
 		k.Id.String(),
+		hex.EncodeToString(k.State.Bytes()),
+		hex.EncodeToString(k.CurrentDerivation.Bytes()),
 		version,
 	}
 	j, err = json.Marshal(jStruct)
 	return j, err
 }
 
-func (k *Key) UnmarshalJSON(j []byte) (err error) {
-	keyJSON := new(plainKeyJSON)
+func (k *ColdKey) UnmarshalJSON(j []byte) (err error) {
+	keyJSON := new(plainColdKeyJSON)
 	err = json.Unmarshal(j, &keyJSON)
 	if err != nil {
 		return err
@@ -123,21 +150,59 @@ func (k *Key) UnmarshalJSON(j []byte) (err error) {
 		return err
 	}
 
+	state, err := hex.DecodeString(keyJSON.State)
+	if err != nil {
+		return err
+	}
+
+	currentID, err := hex.DecodeString(keyJSON.CurrentDerivation)
+	if err != nil {
+		return err
+	}
+
 	k.Address = common.BytesToAddress(addr)
-	k.PrivateKey = privkey
+	k.MasterPrivateKey = privkey
+	k.State = big.NewInt(0).SetBytes(state)
+	k.CurrentDerivation = big.NewInt(0).SetBytes(currentID)
 
 	return nil
 }
 
-func newKeyFromECDSA(privateKeyECDSA *ecdsa.PrivateKey) *Key {
+// Calculates an equivalent hot key for the current cold key.
+// All the fields from the cold key are copied to avoid incidental data
+// structures.
+func (k ColdKey) CalculateHotKey() HotKey {
+	hotKey := HotKey{}
+
+	mpk := k.MasterPrivateKey.PublicKey
+	state := *k.State
+	derivation := *k.CurrentDerivation
+	hotKey.Id = k.Id
+	hotKey.MasterPublicKey = &mpk
+	hotKey.State = &state
+	hotKey.CurrentDerivation = &derivation
+	hotKey.Address = k.Address
+
+	return hotKey
+}
+
+func newKeyFromECDSA(privateKeyECDSA *ecdsa.PrivateKey) *ColdKey {
 	id, err := uuid.NewRandom()
 	if err != nil {
 		panic(fmt.Sprintf("Could not create random uuid: %v", err))
 	}
-	key := &Key{
-		Id:         id,
-		Address:    crypto.PubkeyToAddress(privateKeyECDSA.PublicKey),
-		PrivateKey: privateKeyECDSA,
+
+	state, err := rand.Int(rand.Reader, math.BigPow(2, keyLength))
+	if err != nil {
+		panic(fmt.Sprintf("Could not create random state: %v", err))
+	}
+
+	key := &ColdKey{
+		Id:                id,
+		Address:           crypto.PubkeyToAddress(privateKeyECDSA.PublicKey),
+		MasterPrivateKey:  privateKeyECDSA,
+		State:             state,
+		CurrentDerivation: big.NewInt(0),
 	}
 	return key
 }
@@ -145,7 +210,7 @@ func newKeyFromECDSA(privateKeyECDSA *ecdsa.PrivateKey) *Key {
 // NewKeyForDirectICAP generates a key whose address fits into < 155 bits so it can fit
 // into the Direct ICAP spec. for simplicity and easier compatibility with other libs, we
 // retry until the first byte is 0.
-func NewKeyForDirectICAP(rand io.Reader) *Key {
+func NewKeyForDirectICAP(rand io.Reader) *ColdKey {
 	randBytes := make([]byte, 64)
 	_, err := rand.Read(randBytes)
 	if err != nil {
@@ -163,7 +228,7 @@ func NewKeyForDirectICAP(rand io.Reader) *Key {
 	return key
 }
 
-func newKey(rand io.Reader) (*Key, error) {
+func newKey(rand io.Reader) (*ColdKey, error) {
 	privateKeyECDSA, err := ecdsa.GenerateKey(crypto.S256(), rand)
 	if err != nil {
 		return nil, err
@@ -171,7 +236,115 @@ func newKey(rand io.Reader) (*Key, error) {
 	return newKeyFromECDSA(privateKeyECDSA), nil
 }
 
-func storeNewKey(ks keyStore, rand io.Reader, auth string) (*Key, accounts.Account, error) {
+// Creates a random ECDSA secret key from a master ECDSA secret key and an
+// identifier.
+// Effectively computes:
+//      sk = msk * id mod P
+func RandSecretKey(masterSecretKey *ecdsa.PrivateKey, id *big.Int) (*ecdsa.PrivateKey, error) {
+	d := new(big.Int).Mul(masterSecretKey.D, id)
+	d.Mod(d, masterSecretKey.Params().N)
+
+	return crypto.ToECDSA(d.Bytes())
+}
+
+// Creates a random ECDSA public key from a master ECDSA public key and an
+// identifier.
+// Effectively computes:
+//      pk = mpk * id
+func RandPublicKey(masterPublicKey *ecdsa.PublicKey, id *big.Int) *ecdsa.PublicKey {
+	pk := new(ecdsa.PublicKey)
+	pk.Curve = masterPublicKey.Curve
+	pk.X, pk.Y = masterPublicKey.ScalarMult(masterPublicKey.X, masterPublicKey.Y, id.Bytes())
+
+	return pk
+}
+
+// Creates the hash of a message from a session public key.
+func sessionMessageHash(pk *ecdsa.PublicKey, nonce *big.Int, message []byte) []byte {
+	messageHashState := crypto.NewKeccakState()
+	messageHashState.Write(pk.X.Bytes())
+	messageHashState.Write(pk.Y.Bytes())
+	messageHashState.Write(nonce.Bytes())
+	messageHashState.Write(message)
+	return messageHashState.Sum(nil)
+}
+
+// Signs a message with the session secret ECDSA key generated from
+// RandSecretKey.
+//
+// Returns a pair composed of a nonce and the signature.
+func SessionSign(sessionSecretKey *SessionKey, message []byte) (nonce *big.Int, sig []byte) {
+	nonce, err := rand.Int(rand.Reader, math.BigPow(2, keyLength))
+	if err != nil {
+		panic(err)
+	}
+
+	pk := &sessionSecretKey.PrivateKey.PublicKey
+
+	message = sessionMessageHash(pk, nonce, message)
+
+	sig, err = crypto.Sign(message, sessionSecretKey.PrivateKey)
+	if err != nil {
+		panic(err)
+	}
+
+	return nonce, sig
+}
+
+// Verifies the signature of a message with the given session public key and nonce.
+func SessionVerify(sessionPublicKey *ecdsa.PublicKey, nonce *big.Int, signature []byte, message []byte) bool {
+	pk := sessionPublicKey
+	message = sessionMessageHash(pk, nonce, message)
+
+	// VerifySignature requires a SEC 1 encoded public key blob and a 64 byte
+	// signature, so we convert those.
+	pkblob := crypto.FromECDSAPub(pk)
+	// Remove 1 byte from the signature to get [R || S] representation.
+	signature = signature[:len(signature)-1]
+	return crypto.VerifySignature(pkblob, message, signature)
+}
+
+func bigIntFromBytes(b []byte) *big.Int {
+	return new(big.Int).SetBytes(b)
+}
+
+// Derives a session secret key for session identifier id.
+//
+// Returns the generated session secret key.
+func (key *ColdKey) SKDer(id *big.Int) *SessionKey {
+	blob := crypto.Keccak256(key.State.Bytes(), id.Bytes())
+	randID, newState := bigIntFromBytes(blob[:16]), bigIntFromBytes(blob[16:])
+
+	sessionSecretKey, err := RandSecretKey(key.MasterPrivateKey, randID)
+	if err != nil {
+		panic(err)
+	}
+
+	key.CurrentDerivation = id
+	key.State = newState
+
+	return &SessionKey{
+		Address:    crypto.PubkeyToAddress(sessionSecretKey.PublicKey),
+		PrivateKey: sessionSecretKey,
+	}
+}
+
+// Derives a session public key for session identifier id.
+//
+// Returns the generated session public key.
+func (key *HotKey) PKDer(id *big.Int) (sessionPublicKey *ecdsa.PublicKey) {
+	blob := crypto.Keccak256(key.State.Bytes(), id.Bytes())
+	randID, newState := bigIntFromBytes(blob[:16]), bigIntFromBytes(blob[16:])
+
+	sessionPublicKey = RandPublicKey(key.MasterPublicKey, randID)
+
+	key.CurrentDerivation = id
+	key.State = newState
+
+	return sessionPublicKey
+}
+
+func storeNewKey(ks keyStore, rand io.Reader, auth string) (*ColdKey, accounts.Account, error) {
 	key, err := newKey(rand)
 	if err != nil {
 		return nil, accounts.Account{}, err
@@ -181,7 +354,7 @@ func storeNewKey(ks keyStore, rand io.Reader, auth string) (*Key, accounts.Accou
 		URL:     accounts.URL{Scheme: KeyStoreScheme, Path: ks.JoinPath(keyFileName(key.Address))},
 	}
 	if err := ks.StoreKey(a.URL.Path, key, auth); err != nil {
-		zeroKey(key.PrivateKey)
+		zeroKey(key.MasterPrivateKey)
 		return nil, a, err
 	}
 	return key, a, err

@@ -32,7 +32,7 @@ import (
 )
 
 // creates a Key and stores that in the given KeyStore by decrypting a presale key JSON
-func importPreSaleKey(keyStore keyStore, keyJSON []byte, password string) (accounts.Account, *Key, error) {
+func importPreSaleKey(keyStore keyStore, keyJSON []byte, password string) (accounts.Account, *ColdKey, error) {
 	key, err := decryptPreSaleKey(keyJSON, password)
 	if err != nil {
 		return accounts.Account{}, nil, err
@@ -52,7 +52,7 @@ func importPreSaleKey(keyStore keyStore, keyJSON []byte, password string) (accou
 	return a, key, err
 }
 
-func decryptPreSaleKey(fileContent []byte, password string) (key *Key, err error) {
+func decryptPreSaleKey(fileContent []byte, password string) (key *ColdKey, err error) {
 	preSaleKeyStruct := struct {
 		EncSeed string
 		EthAddr string
@@ -88,10 +88,10 @@ func decryptPreSaleKey(fileContent []byte, password string) (key *Key, err error
 	ethPriv := crypto.Keccak256(plainText)
 	ecKey := crypto.ToECDSAUnsafe(ethPriv)
 
-	key = &Key{
-		Id:         uuid.UUID{},
-		Address:    crypto.PubkeyToAddress(ecKey.PublicKey),
-		PrivateKey: ecKey,
+	key = &ColdKey{
+		Id:               uuid.UUID{},
+		Address:          crypto.PubkeyToAddress(ecKey.PublicKey),
+		MasterPrivateKey: ecKey,
 	}
 	derivedAddr := hex.EncodeToString(key.Address.Bytes()) // needed because .Hex() gives leading "0x"
 	expectedAddr := preSaleKeyStruct.EthAddr
