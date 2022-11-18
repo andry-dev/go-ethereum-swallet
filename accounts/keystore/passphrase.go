@@ -90,8 +90,8 @@ func (ks keyStorePassphrase) GetKey(addr common.Address, filename, auth string) 
 		return nil, err
 	}
 	// Make sure we're really operating on the requested key (no swap attacks)
-	if key.Address != addr {
-		return nil, fmt.Errorf("key content mismatch: have account %x, want %x", key.Address, addr)
+	if key.Address() != addr {
+		return nil, fmt.Errorf("key content mismatch: have account %x, want %x", key.Address(), addr)
 	}
 	return key, nil
 }
@@ -114,7 +114,7 @@ func (ks keyStorePassphrase) StoreKey(filename string, key *ColdKey, auth string
 	}
 	if !ks.skipKeyFileVerification {
 		// Verify that we can decrypt the file with the given password.
-		_, err = ks.GetKey(key.Address, tmpName, auth)
+		_, err = ks.GetKey(key.Address(), tmpName, auth)
 		if err != nil {
 			msg := "An error was encountered when saving and verifying the keystore file. \n" +
 				"This indicates that the keystore is corrupted. \n" +
@@ -187,8 +187,9 @@ func EncryptKey(key *ColdKey, auth string, scryptN, scryptP int) ([]byte, error)
 	if err != nil {
 		return nil, err
 	}
+
 	encryptedKeyJSONV3 := encryptedColdKeyJSONV3{
-		hex.EncodeToString(key.Address[:]),
+		hex.EncodeToString(key.address[:]),
 		cryptoStruct,
 		key.Id.String(),
 		hex.EncodeToString(key.State.Bytes()),
@@ -234,7 +235,7 @@ func DecryptKey(keyjson []byte, auth string) (*ColdKey, error) {
 	}
 	return &ColdKey{
 		Id:               id,
-		Address:          crypto.PubkeyToAddress(key.PublicKey),
+		address:          crypto.PubkeyToAddress(key.PublicKey),
 		MasterPrivateKey: key,
 	}, nil
 }

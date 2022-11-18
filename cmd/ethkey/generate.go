@@ -94,11 +94,7 @@ If you want to encrypt an existing private key, it can be specified by setting
 		if err != nil {
 			utils.Fatalf("Failed to generate random uuid: %v", err)
 		}
-		key := &keystore.Key{
-			Id:         UUID,
-			Address:    crypto.PubkeyToAddress(privateKey.PublicKey),
-			PrivateKey: privateKey,
-		}
+		key := keystore.NewColdKey(UUID, crypto.PubkeyToAddress(privateKey.PublicKey), privateKey)
 
 		// Encrypt key with passphrase.
 		passphrase := getPassphrase(ctx, true)
@@ -121,7 +117,7 @@ If you want to encrypt an existing private key, it can be specified by setting
 
 		// Output some information.
 		out := outputGenerate{
-			Address: key.Address.Hex(),
+			Address: key.Address().Hex(),
 		}
 		if ctx.Bool(jsonFlag.Name) {
 			mustPrintJSON(out)

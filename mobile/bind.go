@@ -87,7 +87,7 @@ func NewKeyedTransactOpts(keyJson []byte, passphrase string, chainID *big.Int) (
 	if err != nil {
 		return nil, err
 	}
-	auth, err := bind.NewKeyedTransactorWithChainID(key.PrivateKey, chainID)
+	auth, err := bind.NewKeyedTransactorWithChainID(key.MasterPrivateKey, chainID)
 	if err != nil {
 		return nil, err
 	}

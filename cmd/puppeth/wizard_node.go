@@ -125,7 +125,7 @@ func (w *wizard) deployNode(boot bool) {
 					infos.keyJSON, infos.keyPass = "", ""
 				} else {
 					fmt.Println()
-					fmt.Printf("Reuse previous (%s) signing account (y/n)? (default = yes)\n", key.Address.Hex())
+					fmt.Printf("Reuse previous (%s) signing account (y/n)? (default = yes)\n", key.Address().Hex())
 					if !w.readDefaultYesNo(true) {
 						infos.keyJSON, infos.keyPass = "", ""
 					}

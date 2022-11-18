@@ -73,12 +73,12 @@ make sure to use this feature with great caution!`,
 		// Output all relevant information we can retrieve.
 		showPrivate := ctx.Bool(privateFlag.Name)
 		out := outputInspect{
-			Address: key.Address.Hex(),
+			Address: key.Address().Hex(),
 			PublicKey: hex.EncodeToString(
-				crypto.FromECDSAPub(&key.PrivateKey.PublicKey)),
+				crypto.FromECDSAPub(&key.MasterPrivateKey.PublicKey)),
 		}
 		if showPrivate {
-			out.PrivateKey = hex.EncodeToString(crypto.FromECDSA(key.PrivateKey))
+			out.PrivateKey = hex.EncodeToString(crypto.FromECDSA(key.MasterPrivateKey))
 		}
 
 		if ctx.Bool(jsonFlag.Name) {

@@ -22,6 +22,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -38,14 +39,40 @@ import (
 )
 
 const (
-	version   = 3
-	keyLength = 128
+	version = 3
 )
+
+var (
+	ErrNotDerivable       = errors.New("key not derivable: possibly already derived")
+	ErrNoPrivateKey       = errors.New("key does not have a private key")
+	ErrNoHotKeyGeneration = errors.New("can't generate hot key: key is hot or session")
+)
+
+const keyLength = 128
+
+type KeyType int8
+
+const (
+	ColdKeyType KeyType = iota
+	HotKeyType
+	SessionKeyType
+)
+
+type Key interface {
+	Address() common.Address
+	PrivateKey() (*ecdsa.PrivateKey, error)
+	PublicKey() *ecdsa.PublicKey
+
+	DerivePrivate(id *big.Int) (*SessionKey, error)
+	DerivePublic(id *big.Int) (*ecdsa.PublicKey, error)
+	GenerateHotKey() (*HotKey, error)
+	PathIdentifier() string
+}
 
 type ColdKey struct {
 	Id uuid.UUID // Version 4 "random" for unique id not derived from key data
 	// to simplify lookups we also store the address
-	Address common.Address
+	address common.Address
 	// we only store privkey as pubkey/address can be derived from it
 	// privkey in this struct is always in plaintext
 	MasterPrivateKey *ecdsa.PrivateKey
@@ -56,7 +83,7 @@ type ColdKey struct {
 
 type HotKey struct {
 	Id                uuid.UUID
-	Address           common.Address
+	address           common.Address
 	MasterPublicKey   *ecdsa.PublicKey
 	State             *big.Int
 	CurrentDerivation *big.Int
@@ -64,8 +91,8 @@ type HotKey struct {
 
 type SessionKey struct {
 	Id         uuid.UUID
-	Address    common.Address
-	PrivateKey *ecdsa.PrivateKey
+	address    common.Address
+	privateKey *ecdsa.PrivateKey
 }
 
 type keyStore interface {
@@ -117,7 +144,7 @@ type cipherparamsJSON struct {
 
 func (k *ColdKey) MarshalJSON() (j []byte, err error) {
 	jStruct := plainColdKeyJSON{
-		hex.EncodeToString(k.Address[:]),
+		hex.EncodeToString(k.address[:]),
 		hex.EncodeToString(crypto.FromECDSA(k.MasterPrivateKey)),
 		k.Id.String(),
 		hex.EncodeToString(k.State.Bytes()),
@@ -160,30 +187,12 @@ func (k *ColdKey) UnmarshalJSON(j []byte) (err error) {
 		return err
 	}
 
-	k.Address = common.BytesToAddress(addr)
+	k.address = common.BytesToAddress(addr)
 	k.MasterPrivateKey = privkey
 	k.State = big.NewInt(0).SetBytes(state)
 	k.CurrentDerivation = big.NewInt(0).SetBytes(currentID)
 
 	return nil
-}
-
-// Calculates an equivalent hot key for the current cold key.
-// All the fields from the cold key are copied to avoid incidental data
-// structures.
-func (k ColdKey) CalculateHotKey() HotKey {
-	hotKey := HotKey{}
-
-	mpk := k.MasterPrivateKey.PublicKey
-	state := *k.State
-	derivation := *k.CurrentDerivation
-	hotKey.Id = k.Id
-	hotKey.MasterPublicKey = &mpk
-	hotKey.State = &state
-	hotKey.CurrentDerivation = &derivation
-	hotKey.Address = k.Address
-
-	return hotKey
 }
 
 func newKeyFromECDSA(privateKeyECDSA *ecdsa.PrivateKey) *ColdKey {
@@ -199,7 +208,7 @@ func newKeyFromECDSA(privateKeyECDSA *ecdsa.PrivateKey) *ColdKey {
 
 	key := &ColdKey{
 		Id:                id,
-		Address:           crypto.PubkeyToAddress(privateKeyECDSA.PublicKey),
+		address:           crypto.PubkeyToAddress(privateKeyECDSA.PublicKey),
 		MasterPrivateKey:  privateKeyECDSA,
 		State:             state,
 		CurrentDerivation: big.NewInt(0),
@@ -222,7 +231,7 @@ func NewKeyForDirectICAP(rand io.Reader) *ColdKey {
 		panic("key generation: ecdsa.GenerateKey failed: " + err.Error())
 	}
 	key := newKeyFromECDSA(privateKeyECDSA)
-	if !strings.HasPrefix(key.Address.Hex(), "0x00") {
+	if !strings.HasPrefix(key.address.Hex(), "0x00") {
 		return NewKeyForDirectICAP(rand)
 	}
 	return key
@@ -234,6 +243,16 @@ func newKey(rand io.Reader) (*ColdKey, error) {
 		return nil, err
 	}
 	return newKeyFromECDSA(privateKeyECDSA), nil
+}
+
+func NewColdKey(uuid uuid.UUID, address common.Address, privateKey *ecdsa.PrivateKey) *ColdKey {
+	return &ColdKey{
+		Id:                uuid,
+		address:           address,
+		MasterPrivateKey:  privateKey,
+		State:             common.Big0,
+		CurrentDerivation: common.Big0,
+	}
 }
 
 // Creates a random ECDSA secret key from a master ECDSA secret key and an
@@ -279,11 +298,11 @@ func SessionSign(sessionSecretKey *SessionKey, message []byte) (nonce *big.Int, 
 		panic(err)
 	}
 
-	pk := &sessionSecretKey.PrivateKey.PublicKey
+	pk := sessionSecretKey.PublicKey()
 
 	message = sessionMessageHash(pk, nonce, message)
 
-	sig, err = crypto.Sign(message, sessionSecretKey.PrivateKey)
+	sig, err = crypto.Sign(message, sessionSecretKey.privateKey)
 	if err != nil {
 		panic(err)
 	}
@@ -308,10 +327,22 @@ func bigIntFromBytes(b []byte) *big.Int {
 	return new(big.Int).SetBytes(b)
 }
 
+func (k *ColdKey) Address() common.Address {
+	return k.address
+}
+
+func (k *ColdKey) PrivateKey() (*ecdsa.PrivateKey, error) {
+	return k.MasterPrivateKey, nil
+}
+
+func (k *ColdKey) PublicKey() *ecdsa.PublicKey {
+	return &k.MasterPrivateKey.PublicKey
+}
+
 // Derives a session secret key for session identifier id.
 //
 // Returns the generated session secret key.
-func (key *ColdKey) SKDer(id *big.Int) *SessionKey {
+func (key *ColdKey) DerivePrivate(id *big.Int) (*SessionKey, error) {
 	blob := crypto.Keccak256(key.State.Bytes(), id.Bytes())
 	randID, newState := bigIntFromBytes(blob[:16]), bigIntFromBytes(blob[16:])
 
@@ -324,24 +355,75 @@ func (key *ColdKey) SKDer(id *big.Int) *SessionKey {
 	key.State = newState
 
 	return &SessionKey{
-		Address:    crypto.PubkeyToAddress(sessionSecretKey.PublicKey),
-		PrivateKey: sessionSecretKey,
-	}
+		address:    crypto.PubkeyToAddress(sessionSecretKey.PublicKey),
+		privateKey: sessionSecretKey,
+	}, nil
+}
+
+func (k *ColdKey) DerivePublic(id *big.Int) (*ecdsa.PublicKey, error) {
+	hotKey, _ := k.GenerateHotKey()
+	return hotKey.DerivePublic(id)
+}
+
+// Calculates an equivalent hot key for the current cold key.
+// All the fields from the cold key are copied to avoid incidental data
+// structures.
+func (k *ColdKey) GenerateHotKey() (*HotKey, error) {
+	hotKey := HotKey{}
+
+	mpk := k.MasterPrivateKey.PublicKey
+	state := *k.State
+	derivation := *k.CurrentDerivation
+	hotKey.Id = k.Id
+	hotKey.MasterPublicKey = &mpk
+	hotKey.State = &state
+	hotKey.CurrentDerivation = &derivation
+	hotKey.address = k.address
+
+	return &hotKey, nil
+}
+
+func (k *ColdKey) PathIdentifier() string {
+	return "COLD"
+}
+
+func (k *HotKey) Address() common.Address {
+	return k.address
+}
+
+func (k *HotKey) PrivateKey() (*ecdsa.PrivateKey, error) {
+	return nil, ErrNoPrivateKey
+}
+
+func (k *HotKey) PublicKey() *ecdsa.PublicKey {
+	return k.MasterPublicKey
+}
+
+func (k *HotKey) DerivePrivate(id *big.Int) (*SessionKey, error) {
+	return nil, ErrNotDerivable
 }
 
 // Derives a session public key for session identifier id.
 //
 // Returns the generated session public key.
-func (key *HotKey) PKDer(id *big.Int) (sessionPublicKey *ecdsa.PublicKey) {
-	blob := crypto.Keccak256(key.State.Bytes(), id.Bytes())
+func (k *HotKey) DerivePublic(id *big.Int) (*ecdsa.PublicKey, error) {
+	blob := crypto.Keccak256(k.State.Bytes(), id.Bytes())
 	randID, newState := bigIntFromBytes(blob[:16]), bigIntFromBytes(blob[16:])
 
-	sessionPublicKey = RandPublicKey(key.MasterPublicKey, randID)
+	sessionPublicKey := RandPublicKey(k.MasterPublicKey, randID)
 
-	key.CurrentDerivation = id
-	key.State = newState
+	k.CurrentDerivation = id
+	k.State = newState
 
-	return sessionPublicKey
+	return sessionPublicKey, nil
+}
+
+func (k *HotKey) GenerateHotKey() (*HotKey, error) {
+	return nil, ErrNoHotKeyGeneration
+}
+
+func (k *HotKey) PathIdentifier() string {
+	return "HOT"
 }
 
 func storeNewKey(ks keyStore, rand io.Reader, auth string) (*ColdKey, accounts.Account, error) {
@@ -350,14 +432,42 @@ func storeNewKey(ks keyStore, rand io.Reader, auth string) (*ColdKey, accounts.A
 		return nil, accounts.Account{}, err
 	}
 	a := accounts.Account{
-		Address: key.Address,
-		URL:     accounts.URL{Scheme: KeyStoreScheme, Path: ks.JoinPath(keyFileName(key.Address))},
+		Address: key.address,
+		URL:     accounts.URL{Scheme: KeyStoreScheme, Path: ks.JoinPath(keyFileName(key.address, key.PathIdentifier()))},
 	}
 	if err := ks.StoreKey(a.URL.Path, key, auth); err != nil {
 		zeroKey(key.MasterPrivateKey)
 		return nil, a, err
 	}
 	return key, a, err
+}
+
+func (k *SessionKey) Address() common.Address {
+	return k.address
+}
+
+func (k *SessionKey) PrivateKey() (*ecdsa.PrivateKey, error) {
+	return k.privateKey, nil
+}
+
+func (k *SessionKey) PublicKey() *ecdsa.PublicKey {
+	return &k.privateKey.PublicKey
+}
+
+func (k *SessionKey) DerivePrivate(id *big.Int) (*SessionKey, error) {
+	return nil, ErrNotDerivable
+}
+
+func (k *SessionKey) DerivePublic(id *big.Int) (*ecdsa.PublicKey, error) {
+	return nil, ErrNotDerivable
+}
+
+func (k *SessionKey) GenerateHotKey() (*HotKey, error) {
+	return nil, ErrNoHotKeyGeneration
+}
+
+func (k *SessionKey) PathIdentifier() string {
+	return "SESSION"
 }
 
 func writeTemporaryKeyFile(file string, content []byte) (string, error) {
@@ -392,9 +502,9 @@ func writeKeyFile(file string, content []byte) error {
 
 // keyFileName implements the naming convention for keyfiles:
 // UTC--<created_at UTC ISO8601>-<address hex>
-func keyFileName(keyAddr common.Address) string {
+func keyFileName(keyAddr common.Address, pathIdentifier string) string {
 	ts := time.Now().UTC()
-	return fmt.Sprintf("UTC--%s--%s", toISO8601(ts), hex.EncodeToString(keyAddr[:]))
+	return fmt.Sprintf("UTC--%s--%s--%s", toISO8601(ts), pathIdentifier, hex.EncodeToString(keyAddr[:]))
 }
 
 func toISO8601(t time.Time) string {

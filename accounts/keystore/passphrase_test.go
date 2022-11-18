@@ -48,8 +48,8 @@ func TestKeyEncryptDecrypt(t *testing.T) {
 		if err != nil {
 			t.Fatalf("test %d: json key failed to decrypt: %v", i, err)
 		}
-		if key.Address != address {
-			t.Errorf("test %d: key address mismatch: have %x, want %x", i, key.Address, address)
+		if key.Address() != address {
+			t.Errorf("test %d: key address mismatch: have %x, want %x", i, key.Address(), address)
 		}
 		// Recrypt with a new password and start over
 		password += "new data appended" // nolint: gosec

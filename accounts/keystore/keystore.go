@@ -445,9 +445,9 @@ func (ks *KeyStore) Import(keyJSON []byte, passphrase, newPassphrase string) (ac
 	ks.importMu.Lock()
 	defer ks.importMu.Unlock()
 
-	if ks.cache.hasAddress(key.Address) {
+	if ks.cache.hasAddress(key.Address()) {
 		return accounts.Account{
-			Address: key.Address,
+			Address: key.Address(),
 		}, ErrAccountAlreadyExists
 	}
 	return ks.importKey(key, newPassphrase)
@@ -459,16 +459,16 @@ func (ks *KeyStore) ImportECDSA(priv *ecdsa.PrivateKey, passphrase string) (acco
 	defer ks.importMu.Unlock()
 
 	key := newKeyFromECDSA(priv)
-	if ks.cache.hasAddress(key.Address) {
+	if ks.cache.hasAddress(key.Address()) {
 		return accounts.Account{
-			Address: key.Address,
+			Address: key.Address(),
 		}, ErrAccountAlreadyExists
 	}
 	return ks.importKey(key, passphrase)
 }
 
 func (ks *KeyStore) importKey(key *ColdKey, passphrase string) (accounts.Account, error) {
-	a := accounts.Account{Address: key.Address, URL: accounts.URL{Scheme: KeyStoreScheme, Path: ks.storage.JoinPath(keyFileName(key.Address))}}
+	a := accounts.Account{Address: key.Address(), URL: accounts.URL{Scheme: KeyStoreScheme, Path: ks.storage.JoinPath(keyFileName(key.Address(), key.PathIdentifier()))}}
 	if err := ks.storage.StoreKey(a.URL.Path, key, passphrase); err != nil {
 		return accounts.Account{}, err
 	}

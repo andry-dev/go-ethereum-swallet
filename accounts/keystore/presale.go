@@ -42,10 +42,10 @@ func importPreSaleKey(keyStore keyStore, keyJSON []byte, password string) (accou
 		return accounts.Account{}, nil, err
 	}
 	a := accounts.Account{
-		Address: key.Address,
+		Address: key.Address(),
 		URL: accounts.URL{
 			Scheme: KeyStoreScheme,
-			Path:   keyStore.JoinPath(keyFileName(key.Address)),
+			Path:   keyStore.JoinPath(keyFileName(key.Address(), key.PathIdentifier())),
 		},
 	}
 	err = keyStore.StoreKey(a.URL.Path, key, password)
@@ -90,10 +90,10 @@ func decryptPreSaleKey(fileContent []byte, password string) (key *ColdKey, err e
 
 	key = &ColdKey{
 		Id:               uuid.UUID{},
-		Address:          crypto.PubkeyToAddress(ecKey.PublicKey),
+		address:          crypto.PubkeyToAddress(ecKey.PublicKey),
 		MasterPrivateKey: ecKey,
 	}
-	derivedAddr := hex.EncodeToString(key.Address.Bytes()) // needed because .Hex() gives leading "0x"
+	derivedAddr := hex.EncodeToString(key.Address().Bytes()) // needed because .Hex() gives leading "0x"
 	expectedAddr := preSaleKeyStruct.EthAddr
 	if derivedAddr != expectedAddr {
 		err = fmt.Errorf("decrypted addr '%s' not equal to expected addr '%s'", derivedAddr, expectedAddr)
