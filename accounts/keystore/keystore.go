@@ -258,6 +258,49 @@ func (ks *KeyStore) Delete(a accounts.Account, passphrase string) error {
 	return err
 }
 
+func (ks *KeyStore) DeriveSessionAccount(account accounts.Account, derivationID []byte, basePassphrase, sessionPassphrase string) (accounts.Account, error) {
+	account, unlockedKey, err := ks.getDecryptedKey(account, basePassphrase)
+	if err != nil {
+		return accounts.Account{}, err
+	}
+
+	generatedKey, err := unlockedKey.DerivePrivate(derivationID)
+	if err != nil {
+		// Maybe we are deriving an hot wallet?
+		// generatedKey, err = unlockedKey.DerivePublic(derivationID)
+		// if errPub != nil {
+		// 	// We are deriving a session key, which is not possible
+		// 	return accounts.Account{}, errPub
+		// }
+
+		return accounts.Account{}, err
+	}
+
+	sessionAccount := accounts.Account{
+		Address: generatedKey.Address(),
+		URL: accounts.URL{
+			Scheme: KeyStoreScheme,
+			Path:   ks.storage.JoinPath(keyFileName(generatedKey.Address(), generatedKey.PathIdentifier())),
+		},
+	}
+
+	// Create the session key
+	if err := ks.storage.StoreKey(sessionAccount.URL.Path, generatedKey, sessionPassphrase); err != nil {
+		return accounts.Account{}, err
+	}
+
+	fmt.Printf("\n\nAccount Path: %v\n", account.URL.Path)
+
+	// Update the original key
+	if err := ks.storage.StoreKey(account.URL.Path, unlockedKey, basePassphrase); err != nil {
+		return accounts.Account{}, err
+	}
+
+	ks.cache.add(sessionAccount)
+	ks.refreshWallets()
+	return sessionAccount, nil
+}
+
 // SignHash calculates a ECDSA signature for the given hash. The produced
 // signature is in the [R || S || V] format where V is 0 or 1.
 func (ks *KeyStore) SignHash(a accounts.Account, hash []byte) ([]byte, error) {
@@ -357,10 +400,10 @@ func (ks *KeyStore) TimedUnlock(a accounts.Account, passphrase string, timeout t
 		close(u.abort)
 	}
 	if timeout > 0 {
-		u = &unlocked{ColdKey: key, abort: make(chan struct{})}
+		u = &unlocked{Key: key, abort: make(chan struct{})}
 		go ks.expire(a.Address, u, timeout)
 	} else {
-		u = &unlocked{ColdKey: key}
+		u = &unlocked{Key: key}
 	}
 	ks.unlocked[a.Address] = u
 	return nil
@@ -375,7 +418,7 @@ func (ks *KeyStore) Find(a accounts.Account) (accounts.Account, error) {
 	return a, err
 }
 
-func (ks *KeyStore) getDecryptedKey(a accounts.Account, auth string) (accounts.Account, *ColdKey, error) {
+func (ks *KeyStore) getDecryptedKey(a accounts.Account, auth string) (accounts.Account, Key, error) {
 	a, err := ks.Find(a)
 	if err != nil {
 		return a, nil, err
@@ -467,7 +510,7 @@ func (ks *KeyStore) ImportECDSA(priv *ecdsa.PrivateKey, passphrase string) (acco
 	return ks.importKey(key, passphrase)
 }
 
-func (ks *KeyStore) importKey(key *ColdKey, passphrase string) (accounts.Account, error) {
+func (ks *KeyStore) importKey(key Key, passphrase string) (accounts.Account, error) {
 	a := accounts.Account{Address: key.Address(), URL: accounts.URL{Scheme: KeyStoreScheme, Path: ks.storage.JoinPath(keyFileName(key.Address(), key.PathIdentifier()))}}
 	if err := ks.storage.StoreKey(a.URL.Path, key, passphrase); err != nil {
 		return accounts.Account{}, err

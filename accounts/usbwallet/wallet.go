@@ -518,6 +518,10 @@ func (w *wallet) SelfDerive(bases []accounts.DerivationPath, chain ethereum.Chai
 	w.deriveChain = chain
 }
 
+func (w *wallet) DeriveSessionAccount(derivationID []byte, basePassphrase, sessionPassphrase string) (accounts.Account, error) {
+	return accounts.Account{}, fmt.Errorf("Session account derivation not supported for USB wallets")
+}
+
 // signHash implements accounts.Wallet, however signing arbitrary data is not
 // supported for hardware wallets, so this method will always return an error.
 func (w *wallet) signHash(account accounts.Account, hash []byte) ([]byte, error) {

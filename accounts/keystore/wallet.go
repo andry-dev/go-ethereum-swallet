@@ -80,6 +80,10 @@ func (w *keystoreWallet) Derive(path accounts.DerivationPath, pin bool) (account
 func (w *keystoreWallet) SelfDerive(bases []accounts.DerivationPath, chain ethereum.ChainStateReader) {
 }
 
+func (w *keystoreWallet) DeriveSessionAccount(derivationID []byte, basePassphrase, sessionPassphrase string) (accounts.Account, error) {
+	return w.keystore.DeriveSessionAccount(w.account, derivationID, basePassphrase, sessionPassphrase)
+}
+
 // signHash attempts to sign the given hash with
 // the given account. If the wallet does not wrap this particular account, an
 // error is returned to avoid account leakage (even though in theory we may be

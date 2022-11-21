@@ -79,7 +79,7 @@ type keyStorePassphrase struct {
 	skipKeyFileVerification bool
 }
 
-func (ks keyStorePassphrase) GetKey(addr common.Address, filename, auth string) (*ColdKey, error) {
+func (ks keyStorePassphrase) GetKey(addr common.Address, filename, auth string) (Key, error) {
 	// Load the key from the keystore and decrypt its contents
 	keyjson, err := os.ReadFile(filename)
 	if err != nil {
@@ -102,7 +102,7 @@ func StoreKey(dir, auth string, scryptN, scryptP int) (accounts.Account, error) 
 	return a, err
 }
 
-func (ks keyStorePassphrase) StoreKey(filename string, key *ColdKey, auth string) error {
+func (ks keyStorePassphrase) StoreKey(filename string, key Key, auth string) error {
 	keyjson, err := EncryptKey(key, auth, ks.scryptN, ks.scryptP)
 	if err != nil {
 		return err
@@ -200,7 +200,7 @@ func EncryptKey(key *ColdKey, auth string, scryptN, scryptP int) ([]byte, error)
 }
 
 // DecryptKey decrypts a key from a json blob, returning the private key itself.
-func DecryptKey(keyjson []byte, auth string) (*ColdKey, error) {
+func DecryptKey(keyjson []byte, auth string) (Key, error) {
 	// Parse the json into a simple map to fetch the key version
 	m := make(map[string]interface{})
 	if err := json.Unmarshal(keyjson, &m); err != nil {

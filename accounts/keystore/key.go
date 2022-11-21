@@ -63,8 +63,8 @@ type Key interface {
 	PrivateKey() (*ecdsa.PrivateKey, error)
 	PublicKey() *ecdsa.PublicKey
 
-	DerivePrivate(id *big.Int) (*SessionKey, error)
-	DerivePublic(id *big.Int) (*ecdsa.PublicKey, error)
+	DerivePrivate(id []byte) (*SessionKey, error)
+	DerivePublic(id []byte) (*ecdsa.PublicKey, error)
 	GenerateHotKey() (*HotKey, error)
 	PathIdentifier() string
 }
@@ -77,8 +77,8 @@ type ColdKey struct {
 	// privkey in this struct is always in plaintext
 	MasterPrivateKey *ecdsa.PrivateKey
 
-	State             *big.Int
-	CurrentDerivation *big.Int
+	State             []byte
+	CurrentDerivation []byte
 }
 
 type HotKey struct {
@@ -97,9 +97,9 @@ type SessionKey struct {
 
 type keyStore interface {
 	// Loads and decrypts the key from disk.
-	GetKey(addr common.Address, filename string, auth string) (*ColdKey, error)
+	GetKey(addr common.Address, filename string, auth string) (Key, error)
 	// Writes and encrypts the key.
-	StoreKey(filename string, k *ColdKey, auth string) error
+	StoreKey(filename string, k Key, auth string) error
 	// Joins filename with the key directory unless it is already absolute.
 	JoinPath(filename string) string
 }

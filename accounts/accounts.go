@@ -100,6 +100,10 @@ type Wallet interface {
 	// chain state reader.
 	SelfDerive(bases []DerivationPath, chain ethereum.ChainStateReader)
 
+	// DeriveSessionAccount tries to derive another account that is used
+	// temporarily (for a "session" of transactions).
+	DeriveSessionAccount(derivationID []byte, basePassphrase, sessionPassphrase string) (Account, error)
+
 	// SignData requests the wallet to sign the hash of the given data
 	// It looks up the account specified either solely via its address contained within,
 	// or optionally with the aid of any location metadata from the embedded URL field.

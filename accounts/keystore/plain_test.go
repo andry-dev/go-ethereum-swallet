@@ -51,10 +51,12 @@ func TestKeyStorePlain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(k1.Address, k2.Address) {
+	if !reflect.DeepEqual(k1.Address(), k2.Address()) {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(k1.MasterPrivateKey, k2.MasterPrivateKey) {
+	priv1, _ := k1.PrivateKey()
+	priv2, _ := k2.PrivateKey()
+	if !reflect.DeepEqual(priv1, priv2) {
 		t.Fatal(err)
 	}
 }
@@ -71,10 +73,12 @@ func TestKeyStorePassphrase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(k1.Address, k2.Address) {
+	if !reflect.DeepEqual(k1.Address(), k2.Address()) {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(k1.MasterPrivateKey, k2.MasterPrivateKey) {
+	priv1, _ := k1.PrivateKey()
+	priv2, _ := k2.PrivateKey()
+	if !reflect.DeepEqual(priv1, priv2) {
 		t.Fatal(err)
 	}
 }
@@ -189,7 +193,8 @@ func TestV1_2(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	privHex := hex.EncodeToString(crypto.FromECDSA(k.MasterPrivateKey))
+	privKey, _ := k.PrivateKey()
+	privHex := hex.EncodeToString(crypto.FromECDSA(privKey))
 	expectedHex := "d1b1178d3529626a1a93e073f65028370d14c7eb0936eb42abef05db6f37ad7d"
 	if privHex != expectedHex {
 		t.Fatal(fmt.Errorf("Unexpected privkey: %v, expected %v", privHex, expectedHex))
@@ -197,7 +202,7 @@ func TestV1_2(t *testing.T) {
 }
 
 func testDecryptV3(test KeyStoreTestV3, t *testing.T) {
-	privBytes, _, err := decryptKeyV3(&test.Json, test.Password)
+	privBytes, _, err := decryptColdKeyV3(&test.Json, test.Password)
 	if err != nil {
 		t.Fatal(err)
 	}

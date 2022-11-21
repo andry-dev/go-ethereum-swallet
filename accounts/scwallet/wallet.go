@@ -660,6 +660,10 @@ func (w *Wallet) SelfDerive(bases []accounts.DerivationPath, chain ethereum.Chai
 	w.deriveChain = chain
 }
 
+func (w *Wallet) DeriveSessionAccount(derivationID []byte, basePassphrase, sessionPassphrase string) (accounts.Account, error) {
+	return accounts.Account{}, fmt.Errorf("Session account derivation not supported for smartcard wallets")
+}
+
 // SignData requests the wallet to sign the hash of the given data.
 //
 // It looks up the account specified either solely via its address contained within,
