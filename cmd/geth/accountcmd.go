@@ -123,6 +123,25 @@ password to file or expose in any other way.
 `,
 			},
 			{
+				Name:      "derive",
+				Usage:     "Creates a session account",
+				Action:    accountDerive,
+				ArgsUsage: "<address> <derivation_id>",
+				Flags: []cli.Flag{
+					utils.DataDirFlag,
+					utils.KeyStoreDirFlag,
+					utils.LightKDFFlag,
+				},
+				Description: `
+    geth account derive <address> <derivation_id>
+
+Derives a session key from a stored address. Can be used on both a cold wallet
+or an hot wallet.
+
+
+                `,
+			},
+			{
 				Name:      "update",
 				Usage:     "Update an existing account",
 				Action:    accountUpdate,
@@ -291,6 +310,35 @@ func accountCreate(ctx *cli.Context) error {
 	fmt.Printf("- You must NEVER share the secret key with anyone! The key controls access to your funds!\n")
 	fmt.Printf("- You must BACKUP your key file! Without the key, it's impossible to access account funds!\n")
 	fmt.Printf("- You must REMEMBER your password! Without the password, it's impossible to decrypt the key!\n\n")
+	return nil
+}
+
+func accountDerive(ctx *cli.Context) error {
+	if ctx.Args().Len() < 2 {
+		utils.Fatalf("No accounts and/or derivation ID specified")
+	}
+
+	stack, _ := makeConfigNode(ctx)
+	ks := stack.AccountManager().Backends(keystore.KeyStoreType)[0].(*keystore.KeyStore)
+
+	baseAddr := ctx.Args().Get(0)
+	derivationID := []byte(ctx.Args().Get(1))
+
+	log.Info("Derivation:", "derivation", derivationID)
+
+	baseAccount, basePassphrase := unlockAccount(ks, baseAddr, 0, nil)
+	sessionPassphrase := utils.GetPassPhraseWithList("Please give a password for the session key. Do not forget this password.", true, 0, nil)
+
+	sessionAccount, err := ks.DeriveSessionAccount(baseAccount, derivationID, basePassphrase, sessionPassphrase)
+	log.Info("Derived account", "account", sessionAccount)
+	if err != nil {
+		utils.Fatalf("Could not derive session key: %v", err)
+	}
+
+	fmt.Printf("\nYour new session key was generated\n\n")
+	fmt.Printf("Public address of the session key: %s\n\n", sessionAccount.Address.Hex())
+	fmt.Printf("Path of the session key:           %s\n", sessionAccount.URL.Path)
+
 	return nil
 }
 
