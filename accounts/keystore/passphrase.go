@@ -39,7 +39,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/pbkdf2"
@@ -181,22 +180,8 @@ func EncryptDataV3(data, auth []byte, scryptN, scryptP int) (CryptoJSON, error) 
 
 // EncryptKey encrypts a key using the specified scrypt parameters into a json
 // blob that can be decrypted later on.
-func EncryptKey(key *ColdKey, auth string, scryptN, scryptP int) ([]byte, error) {
-	keyBytes := math.PaddedBigBytes(key.MasterPrivateKey.D, 32)
-	cryptoStruct, err := EncryptDataV3(keyBytes, []byte(auth), scryptN, scryptP)
-	if err != nil {
-		return nil, err
-	}
-
-	encryptedKeyJSONV3 := encryptedColdKeyJSONV3{
-		hex.EncodeToString(key.address[:]),
-		cryptoStruct,
-		key.Id.String(),
-		hex.EncodeToString(key.State.Bytes()),
-		hex.EncodeToString(key.CurrentDerivation.Bytes()),
-		version,
-	}
-	return json.Marshal(encryptedKeyJSONV3)
+func EncryptKey(key Key, auth string, scryptN, scryptP int) ([]byte, error) {
+	return key.MarshalJSONSecure(auth, scryptN, scryptP)
 }
 
 // DecryptKey decrypts a key from a json blob, returning the private key itself.
@@ -206,12 +191,31 @@ func DecryptKey(keyjson []byte, auth string) (Key, error) {
 	if err := json.Unmarshal(keyjson, &m); err != nil {
 		return nil, err
 	}
+
+	if keytype, ok := m["keytype"].(string); ok {
+		switch keytype {
+		case fmt.Sprint(ColdKeyType):
+			return decryptColdKey(keyjson, m, auth)
+		case fmt.Sprint(HotKeyType):
+			return decryptHotKey(keyjson, auth)
+		case fmt.Sprint(SessionKeyType):
+			return decryptSessionKey(keyjson, auth)
+		}
+	}
+
+	// JSON does not have a keytype, assume cold key.
+
+	return decryptColdKey(keyjson, m, auth)
+}
+
+func decryptColdKey(keyjson []byte, data map[string]interface{}, auth string) (*ColdKey, error) {
 	// Depending on the version try to parse one way or another
 	var (
-		keyBytes, keyId []byte
-		err             error
+		keyBytes, keyId   []byte
+		state, derivation []byte
+		err               error
 	)
-	if version, ok := m["version"].(string); ok && version == "1" {
+	if version, ok := data["version"].(string); ok && version == "1" {
 		k := new(encryptedKeyJSONV1)
 		if err := json.Unmarshal(keyjson, k); err != nil {
 			return nil, err
@@ -222,7 +226,9 @@ func DecryptKey(keyjson []byte, auth string) (Key, error) {
 		if err := json.Unmarshal(keyjson, k); err != nil {
 			return nil, err
 		}
-		keyBytes, keyId, err = decryptKeyV3(k, auth)
+		keyBytes, keyId, err = decryptColdKeyV3(k, auth)
+		state, err = hex.DecodeString(k.State)
+		derivation, err = hex.DecodeString(k.CurrentDerivation)
 	}
 	// Handle any decryption errors and return the key
 	if err != nil {
@@ -234,9 +240,63 @@ func DecryptKey(keyjson []byte, auth string) (Key, error) {
 		return nil, err
 	}
 	return &ColdKey{
-		Id:               id,
-		address:          crypto.PubkeyToAddress(key.PublicKey),
-		MasterPrivateKey: key,
+		Id:                id,
+		address:           crypto.PubkeyToAddress(key.PublicKey),
+		MasterPrivateKey:  key,
+		State:             state,
+		CurrentDerivation: derivation,
+	}, nil
+}
+
+func decryptHotKey(keyjson []byte, auth string) (*HotKey, error) {
+	k := new(plainHotKeyJSONV3)
+
+	if err := json.Unmarshal(keyjson, k); err != nil {
+		return nil, err
+	}
+
+	id, err := uuid.Parse(k.Id)
+	address, err := hex.DecodeString(k.Address)
+	publicKey, err := crypto.UnmarshalPubkey([]byte(k.PublicKey))
+	state, err := hex.DecodeString(k.State)
+	derivation, err := hex.DecodeString(k.CurrentDerivation)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &HotKey{
+		Id:                id,
+		address:           common.BytesToAddress(address),
+		MasterPublicKey:   publicKey,
+		State:             state,
+		CurrentDerivation: derivation,
+	}, nil
+}
+
+func decryptSessionKey(keyjson []byte, auth string) (*SessionKey, error) {
+	var (
+		keyBytes, keyId []byte
+		err             error
+	)
+	k := new(encryptedSessionKeyJSONV3)
+	if err := json.Unmarshal(keyjson, k); err != nil {
+		return nil, err
+	}
+	keyBytes, keyId, err = decryptSessionKeyV3(k, auth)
+	// Handle any decryption errors and return the key
+	if err != nil {
+		return nil, err
+	}
+	key := crypto.ToECDSAUnsafe(keyBytes)
+	id, err := uuid.FromBytes(keyId)
+	if err != nil {
+		return nil, err
+	}
+	return &SessionKey{
+		Id:         id,
+		address:    crypto.PubkeyToAddress(key.PublicKey),
+		privateKey: key,
 	}, nil
 }
 
@@ -276,7 +336,23 @@ func DecryptDataV3(cryptoJson CryptoJSON, auth string) ([]byte, error) {
 	return plainText, err
 }
 
-func decryptKeyV3(keyProtected *encryptedColdKeyJSONV3, auth string) (keyBytes []byte, keyId []byte, err error) {
+func decryptColdKeyV3(keyProtected *encryptedColdKeyJSONV3, auth string) (keyBytes []byte, keyId []byte, err error) {
+	if keyProtected.Version != version {
+		return nil, nil, fmt.Errorf("version not supported: %v", keyProtected.Version)
+	}
+	keyUUID, err := uuid.Parse(keyProtected.Id)
+	if err != nil {
+		return nil, nil, err
+	}
+	keyId = keyUUID[:]
+	plainText, err := DecryptDataV3(keyProtected.Crypto, auth)
+	if err != nil {
+		return nil, nil, err
+	}
+	return plainText, keyId, err
+}
+
+func decryptSessionKeyV3(keyProtected *encryptedSessionKeyJSONV3, auth string) (keyBytes []byte, keyId []byte, err error) {
 	if keyProtected.Version != version {
 		return nil, nil, fmt.Errorf("version not supported: %v", keyProtected.Version)
 	}

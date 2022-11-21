@@ -58,16 +58,16 @@ make sure to use this feature with great caution!`,
 		keyfilepath := ctx.Args().First()
 
 		// Read key from file.
-		keyjson, err := os.ReadFile(keyfilepath)
-		if err != nil {
-			utils.Fatalf("Failed to read the keyfile at '%s': %v", keyfilepath, err)
+		keyjson, errCannotObtainPrivateKey := os.ReadFile(keyfilepath)
+		if errCannotObtainPrivateKey != nil {
+			utils.Fatalf("Failed to read the keyfile at '%s': %v", keyfilepath, errCannotObtainPrivateKey)
 		}
 
 		// Decrypt key with passphrase.
 		passphrase := getPassphrase(ctx, false)
-		key, err := keystore.DecryptKey(keyjson, passphrase)
-		if err != nil {
-			utils.Fatalf("Error decrypting key: %v", err)
+		key, errCannotObtainPrivateKey := keystore.DecryptKey(keyjson, passphrase)
+		if errCannotObtainPrivateKey != nil {
+			utils.Fatalf("Error decrypting key: %v", errCannotObtainPrivateKey)
 		}
 
 		// Output all relevant information we can retrieve.
@@ -75,10 +75,11 @@ make sure to use this feature with great caution!`,
 		out := outputInspect{
 			Address: key.Address().Hex(),
 			PublicKey: hex.EncodeToString(
-				crypto.FromECDSAPub(&key.MasterPrivateKey.PublicKey)),
+				crypto.FromECDSAPub(key.PublicKey())),
 		}
-		if showPrivate {
-			out.PrivateKey = hex.EncodeToString(crypto.FromECDSA(key.MasterPrivateKey))
+		privateKey, errCannotObtainPrivateKey := key.PrivateKey()
+		if showPrivate && errCannotObtainPrivateKey == nil {
+			out.PrivateKey = hex.EncodeToString(crypto.FromECDSA(privateKey))
 		}
 
 		if ctx.Bool(jsonFlag.Name) {
@@ -86,7 +87,7 @@ make sure to use this feature with great caution!`,
 		} else {
 			fmt.Println("Address:       ", out.Address)
 			fmt.Println("Public key:    ", out.PublicKey)
-			if showPrivate {
+			if showPrivate && errCannotObtainPrivateKey == nil {
 				fmt.Println("Private key:   ", out.PrivateKey)
 			}
 		}

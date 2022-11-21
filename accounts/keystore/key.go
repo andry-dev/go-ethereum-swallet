@@ -67,6 +67,8 @@ type Key interface {
 	DerivePublic(id []byte) (*ecdsa.PublicKey, error)
 	GenerateHotKey() (*HotKey, error)
 	PathIdentifier() string
+
+	MarshalJSONSecure(auth string, scryptN, scryptP int) ([]byte, error)
 }
 
 type ColdKey struct {
@@ -119,7 +121,26 @@ type encryptedColdKeyJSONV3 struct {
 	Id                string     `json:"id"`
 	State             string     `json:"state"`
 	CurrentDerivation string     `json:"derivation"`
+	KeyType           int        `json:"keytype"`
 	Version           int        `json:"version"`
+}
+
+type plainHotKeyJSONV3 struct {
+	Address           string `json:"address"`
+	PublicKey         string `json:"publickey"`
+	Id                string `json:"id"`
+	State             string `json:"state"`
+	CurrentDerivation string `json:"derivation"`
+	KeyType           int    `json:"keytype"`
+	Version           int    `json:"version"`
+}
+
+type encryptedSessionKeyJSONV3 struct {
+	Address string     `json:"address"`
+	Crypto  CryptoJSON `json:"crypto"`
+	Id      string     `json:"id"`
+	KeyType int        `json:"keytype"`
+	Version int        `json:"version"`
 }
 
 type encryptedKeyJSONV1 struct {
@@ -413,6 +434,25 @@ func (k *ColdKey) PathIdentifier() string {
 	return "COLD"
 }
 
+func (k *ColdKey) MarshalJSONSecure(auth string, scryptN, scryptP int) ([]byte, error) {
+	keyBytes := math.PaddedBigBytes(k.MasterPrivateKey.D, 32)
+	cryptoStruct, err := EncryptDataV3(keyBytes, []byte(auth), scryptN, scryptP)
+	if err != nil {
+		return nil, err
+	}
+
+	encryptedKeyJSONV3 := encryptedColdKeyJSONV3{
+		hex.EncodeToString(k.address[:]),
+		cryptoStruct,
+		k.Id.String(),
+		hex.EncodeToString(k.State),
+		hex.EncodeToString(k.CurrentDerivation),
+		int(ColdKeyType),
+		version,
+	}
+	return json.Marshal(encryptedKeyJSONV3)
+}
+
 func (k *HotKey) Address() common.Address {
 	return k.address
 }
@@ -452,20 +492,17 @@ func (k *HotKey) PathIdentifier() string {
 	return "HOT"
 }
 
-func storeNewKey(ks keyStore, rand io.Reader, auth string) (*ColdKey, accounts.Account, error) {
-	key, err := newKey(rand)
-	if err != nil {
-		return nil, accounts.Account{}, err
+func (k *HotKey) MarshalJSONSecure(auth string, scryptN, scryptP int) ([]byte, error) {
+	plainKeyJSONV3 := plainHotKeyJSONV3{
+		Address:           hex.EncodeToString(k.address[:]),
+		Id:                k.Id.String(),
+		PublicKey:         hex.EncodeToString(crypto.FromECDSAPub(k.PublicKey())),
+		State:             hex.EncodeToString(k.State),
+		CurrentDerivation: hex.EncodeToString(k.CurrentDerivation),
+		KeyType:           int(HotKeyType),
+		Version:           version,
 	}
-	a := accounts.Account{
-		Address: key.address,
-		URL:     accounts.URL{Scheme: KeyStoreScheme, Path: ks.JoinPath(keyFileName(key.address, key.PathIdentifier()))},
-	}
-	if err := ks.StoreKey(a.URL.Path, key, auth); err != nil {
-		zeroKey(key.MasterPrivateKey)
-		return nil, a, err
-	}
-	return key, a, err
+	return json.Marshal(plainKeyJSONV3)
 }
 
 func (k *SessionKey) Address() common.Address {
@@ -496,6 +533,22 @@ func (k *SessionKey) PathIdentifier() string {
 	return "SESSION"
 }
 
+func (k *SessionKey) MarshalJSONSecure(auth string, scryptN, scryptP int) ([]byte, error) {
+	keyBytes := math.PaddedBigBytes(k.privateKey.D, 32)
+	cryptoStruct, err := EncryptDataV3(keyBytes, []byte(auth), scryptN, scryptP)
+	if err != nil {
+		return nil, err
+	}
+
+	encryptedKeyJSONV3 := encryptedSessionKeyJSONV3{
+		Address: hex.EncodeToString(k.address[:]),
+		Crypto:  cryptoStruct,
+		Id:      k.Id.String(),
+		KeyType: int(SessionKeyType),
+		Version: version,
+	}
+	return json.Marshal(encryptedKeyJSONV3)
+}
 func writeTemporaryKeyFile(file string, content []byte) (string, error) {
 	// Create the keystore directory with appropriate permissions
 	// in case it is not present yet.
@@ -516,6 +569,22 @@ func writeTemporaryKeyFile(file string, content []byte) (string, error) {
 	}
 	f.Close()
 	return f.Name(), nil
+}
+
+func storeNewKey(ks keyStore, rand io.Reader, auth string) (Key, accounts.Account, error) {
+	key, err := newKey(rand)
+	if err != nil {
+		return nil, accounts.Account{}, err
+	}
+	a := accounts.Account{
+		Address: key.address,
+		URL:     accounts.URL{Scheme: KeyStoreScheme, Path: ks.JoinPath(keyFileName(key.address, key.PathIdentifier()))},
+	}
+	if err := ks.StoreKey(a.URL.Path, key, auth); err != nil {
+		zeroKey(key.MasterPrivateKey)
+		return nil, a, err
+	}
+	return key, a, err
 }
 
 func writeKeyFile(file string, content []byte) error {

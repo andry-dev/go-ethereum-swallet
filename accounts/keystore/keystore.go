@@ -24,6 +24,7 @@ import (
 	"crypto/ecdsa"
 	crand "crypto/rand"
 	"errors"
+	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -75,7 +76,7 @@ type KeyStore struct {
 }
 
 type unlocked struct {
-	*ColdKey
+	Key
 	abort chan struct{}
 }
 
@@ -242,7 +243,12 @@ func (ks *KeyStore) Delete(a accounts.Account, passphrase string) error {
 	// immediately afterwards.
 	a, key, err := ks.getDecryptedKey(a, passphrase)
 	if key != nil {
-		zeroKey(key.MasterPrivateKey)
+		privateKey, err := key.PrivateKey()
+		if err != nil {
+			return err
+		}
+
+		zeroKey(privateKey)
 	}
 	if err != nil {
 		return err
@@ -289,8 +295,6 @@ func (ks *KeyStore) DeriveSessionAccount(account accounts.Account, derivationID 
 		return accounts.Account{}, err
 	}
 
-	fmt.Printf("\n\nAccount Path: %v\n", account.URL.Path)
-
 	// Update the original key
 	if err := ks.storage.StoreKey(account.URL.Path, unlockedKey, basePassphrase); err != nil {
 		return accounts.Account{}, err
@@ -312,8 +316,12 @@ func (ks *KeyStore) SignHash(a accounts.Account, hash []byte) ([]byte, error) {
 	if !found {
 		return nil, ErrLocked
 	}
+	privateKey, err := unlockedKey.PrivateKey()
+	if err != nil {
+		return nil, err
+	}
 	// Sign the hash using plain ECDSA operations
-	return crypto.Sign(hash, unlockedKey.MasterPrivateKey)
+	return crypto.Sign(hash, privateKey)
 }
 
 // SignTx signs the given transaction with the requested account.
@@ -328,7 +336,11 @@ func (ks *KeyStore) SignTx(a accounts.Account, tx *types.Transaction, chainID *b
 	}
 	// Depending on the presence of the chain ID, sign with 2718 or homestead
 	signer := types.LatestSignerForChainID(chainID)
-	return types.SignTx(tx, signer, unlockedKey.MasterPrivateKey)
+	privateKey, err := unlockedKey.PrivateKey()
+	if err != nil {
+		return nil, err
+	}
+	return types.SignTx(tx, signer, privateKey)
 }
 
 // SignHashWithPassphrase signs hash if the private key matching the given address
@@ -339,8 +351,14 @@ func (ks *KeyStore) SignHashWithPassphrase(a accounts.Account, passphrase string
 	if err != nil {
 		return nil, err
 	}
-	defer zeroKey(key.MasterPrivateKey)
-	return crypto.Sign(hash, key.MasterPrivateKey)
+
+	privateKey, err := key.PrivateKey()
+	if err != nil {
+		return nil, err
+	}
+
+	defer zeroKey(privateKey)
+	return crypto.Sign(hash, privateKey)
 }
 
 // SignTxWithPassphrase signs the transaction if the private key matching the
@@ -350,10 +368,14 @@ func (ks *KeyStore) SignTxWithPassphrase(a accounts.Account, passphrase string, 
 	if err != nil {
 		return nil, err
 	}
-	defer zeroKey(key.MasterPrivateKey)
+	privateKey, err := key.PrivateKey()
+	if err != nil {
+		return nil, err
+	}
+	defer zeroKey(privateKey)
 	// Depending on the presence of the chain ID, sign with or without replay protection.
 	signer := types.LatestSignerForChainID(chainID)
-	return types.SignTx(tx, signer, key.MasterPrivateKey)
+	return types.SignTx(tx, signer, privateKey)
 }
 
 // Unlock unlocks the given account indefinitely.
@@ -393,7 +415,11 @@ func (ks *KeyStore) TimedUnlock(a accounts.Account, passphrase string, timeout t
 		if u.abort == nil {
 			// The address was unlocked indefinitely, so unlocking
 			// it with a timeout would be confusing.
-			zeroKey(key.MasterPrivateKey)
+			privateKey, err := key.PrivateKey()
+			if err != nil {
+				return err
+			}
+			zeroKey(privateKey)
 			return nil
 		}
 		// Terminate the expire goroutine and replace it below.
@@ -440,7 +466,11 @@ func (ks *KeyStore) expire(addr common.Address, u *unlocked, timeout time.Durati
 		// because the map stores a new pointer every time the key is
 		// unlocked.
 		if ks.unlocked[addr] == u {
-			zeroKey(u.MasterPrivateKey)
+			privateKey, err := u.PrivateKey()
+			if err != nil {
+				panic(err)
+			}
+			zeroKey(privateKey)
 			delete(ks.unlocked, addr)
 		}
 		ks.mu.Unlock()
@@ -479,9 +509,17 @@ func (ks *KeyStore) Export(a accounts.Account, passphrase, newPassphrase string)
 // Import stores the given encrypted JSON key into the key directory.
 func (ks *KeyStore) Import(keyJSON []byte, passphrase, newPassphrase string) (accounts.Account, error) {
 	key, err := DecryptKey(keyJSON, passphrase)
-	if key != nil && key.MasterPrivateKey != nil {
-		defer zeroKey(key.MasterPrivateKey)
+
+	if err != nil {
+		return accounts.Account{}, err
 	}
+
+	privateKey, err := key.PrivateKey()
+
+	if privateKey != nil {
+		defer zeroKey(privateKey)
+	}
+
 	if err != nil {
 		return accounts.Account{}, err
 	}

@@ -261,7 +261,11 @@ func loadSigningKey(keyfile string) *ecdsa.PrivateKey {
 	if err != nil {
 		exit(fmt.Errorf("error decrypting key: %v", err))
 	}
-	return key.MasterPrivateKey
+	privateKey, err := key.PrivateKey()
+	if err != nil {
+		exit(fmt.Errorf("error obtaining private key: %v", err))
+	}
+	return privateKey
 }
 
 // dnsClient configures the DNS discovery client from command line flags.
