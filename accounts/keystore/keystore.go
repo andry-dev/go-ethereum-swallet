@@ -24,6 +24,7 @@ import (
 	"crypto/ecdsa"
 	crand "crypto/rand"
 	"errors"
+	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -302,6 +303,39 @@ func (ks *KeyStore) DeriveSessionAccount(account accounts.Account, derivationID 
 	ks.cache.add(sessionAccount)
 	ks.refreshWallets()
 	return sessionAccount, nil
+}
+
+func (ks *KeyStore) GenerateHotWallet(coldAccount accounts.Account, passphrase string) (accounts.Account, error) {
+	coldAccount, coldKey, err := ks.getDecryptedKey(coldAccount, passphrase)
+
+	if err != nil {
+		return accounts.Account{}, err
+	}
+
+	hotKey, err := coldKey.GenerateHotKey()
+
+	fmt.Println(hotKey)
+
+	if err != nil {
+		return accounts.Account{}, err
+	}
+
+	hotAccount := accounts.Account{
+		Address: hotKey.Address(),
+		URL: accounts.URL{
+			Scheme: KeyStoreScheme,
+			Path:   ks.storage.JoinPath(keyFileName(hotKey.Address(), hotKey.PathIdentifier())),
+		},
+	}
+
+	if err := ks.storage.StoreKey(hotAccount.URL.Path, hotKey, passphrase); err != nil {
+		return accounts.Account{}, err
+	}
+
+	ks.cache.add(hotAccount)
+	ks.refreshWallets()
+
+	return hotAccount, nil
 }
 
 // SignHash calculates a ECDSA signature for the given hash. The produced

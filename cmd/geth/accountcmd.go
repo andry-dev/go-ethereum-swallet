@@ -135,11 +135,32 @@ password to file or expose in any other way.
 				Description: `
     geth account derive <address> <derivation_id>
 
-Derives a session key from a stored address. Can be used on both a cold wallet
-or an hot wallet.
+Derives a session wallet from a stored address. Can be used on both a cold or an hot wallet.
 
+'derivation_id' is the "ID" associated to the generated session wallet, can be any string of bytes.
 
-                `,
+When a session wallet is generated from a cold wallet it is immediately stored in the keystore, which it can then be used to sign transactions. Instead, when a session wallet is generated from an hot wallet then only the generated address is available, so the wallet can only receive transactions; to spend them it's necessary to generate the private key from the cold wallet by deriving it with the same 'derivation_id'.`,
+			},
+			{
+				Name:      "to-hot",
+				Usage:     "Converts a cold wallet to an hot one",
+				Action:    accountConvert,
+				ArgsUsage: "<address>",
+				Flags: []cli.Flag{
+					utils.DataDirFlag,
+					utils.KeyStoreDirFlag,
+					utils.LightKDFFlag,
+				},
+				Description: `
+    geth account to-hot <address>
+
+Converts a cold wallet to an hot wallet. Typically used for exporting an hot
+wallet to other devices.
+
+The account will have the same address but contain only the public key and the
+current state (used for generating session wallets in sync with the cold
+wallet). Such an account can only receive transactions and generate addresses
+for session wallets, it cannot sign transactions.`,
 			},
 			{
 				Name:      "update",
@@ -324,13 +345,10 @@ func accountDerive(ctx *cli.Context) error {
 	baseAddr := ctx.Args().Get(0)
 	derivationID := []byte(ctx.Args().Get(1))
 
-	log.Info("Derivation:", "derivation", derivationID)
-
 	baseAccount, basePassphrase := unlockAccount(ks, baseAddr, 0, nil)
 	sessionPassphrase := utils.GetPassPhraseWithList("Please give a password for the session key. Do not forget this password.", true, 0, nil)
 
 	sessionAccount, err := ks.DeriveSessionAccount(baseAccount, derivationID, basePassphrase, sessionPassphrase)
-	log.Info("Derived account", "account", sessionAccount)
 	if err != nil {
 		utils.Fatalf("Could not derive session key: %v", err)
 	}
@@ -338,6 +356,29 @@ func accountDerive(ctx *cli.Context) error {
 	fmt.Printf("\nYour new session key was generated\n\n")
 	fmt.Printf("Public address of the session key: %s\n\n", sessionAccount.Address.Hex())
 	fmt.Printf("Path of the session key:           %s\n", sessionAccount.URL.Path)
+
+	return nil
+}
+
+func accountConvert(ctx *cli.Context) error {
+	if ctx.Args().Len() != 1 {
+		utils.Fatalf("No account specified")
+	}
+
+	stack, _ := makeConfigNode(ctx)
+	ks := stack.AccountManager().Backends(keystore.KeyStoreType)[0].(*keystore.KeyStore)
+
+	address := ctx.Args().Get(0)
+	account, passphrase := unlockAccount(ks, address, 0, nil)
+
+	hotAccount, err := ks.GenerateHotWallet(account, passphrase)
+
+	if err != nil {
+		utils.Fatalf("Could not generate hot wallet: %v", err)
+	}
+
+	fmt.Printf("\nYour hot wallet was generated\n\n")
+	fmt.Printf("Path of the key file: %s\n", hotAccount.URL.Path)
 
 	return nil
 }
