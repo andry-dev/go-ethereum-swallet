@@ -115,7 +115,7 @@ type plainColdKeyJSON struct {
 	Version           int    `json:"version"`
 }
 
-type encryptedColdKeyJSONV3 struct {
+type encryptedKeyJSONV3 struct {
 	Address           string     `json:"address"`
 	Crypto            CryptoJSON `json:"crypto"`
 	Id                string     `json:"id"`
@@ -133,14 +133,6 @@ type plainHotKeyJSONV3 struct {
 	CurrentDerivation string `json:"derivation"`
 	KeyType           int    `json:"keytype"`
 	Version           int    `json:"version"`
-}
-
-type encryptedSessionKeyJSONV3 struct {
-	Address string     `json:"address"`
-	Crypto  CryptoJSON `json:"crypto"`
-	Id      string     `json:"id"`
-	KeyType int        `json:"keytype"`
-	Version int        `json:"version"`
 }
 
 type encryptedKeyJSONV1 struct {
@@ -389,16 +381,22 @@ func (k *ColdKey) PublicKey() *ecdsa.PublicKey {
 // Derives a session secret key for session identifier id.
 //
 // Returns the generated session secret key.
-func (key *ColdKey) DerivePrivate(id []byte) (*SessionKey, error) {
-	blob := crypto.Keccak256(key.State, id)
+func (key *ColdKey) DerivePrivate(derivationId []byte) (*SessionKey, error) {
+	blob := crypto.Keccak256(key.State, derivationId)
 	randID, newState := bigIntFromBytes(blob[:16]), blob[16:]
 
 	sessionSecretKey, err := RandSecretKey(key.MasterPrivateKey, randID)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	key.CurrentDerivation = id
+	keyUUID, err := uuid.NewRandom()
+	if err != nil {
+		return nil, err
+	}
+	key.Id = keyUUID
+
+	key.CurrentDerivation = derivationId
 	key.State = newState
 
 	return &SessionKey{
@@ -441,7 +439,7 @@ func (k *ColdKey) MarshalJSONSecure(auth string, scryptN, scryptP int) ([]byte, 
 		return nil, err
 	}
 
-	encryptedKeyJSONV3 := encryptedColdKeyJSONV3{
+	encryptedKeyJSONV3 := encryptedKeyJSONV3{
 		hex.EncodeToString(k.address[:]),
 		cryptoStruct,
 		k.Id.String(),
@@ -472,13 +470,13 @@ func (k *HotKey) DerivePrivate(id []byte) (*SessionKey, error) {
 // Derives a session public key for session identifier id.
 //
 // Returns the generated session public key.
-func (k *HotKey) DerivePublic(id []byte) (*ecdsa.PublicKey, error) {
-	blob := crypto.Keccak256(k.State, id)
+func (k *HotKey) DerivePublic(derivationId []byte) (*ecdsa.PublicKey, error) {
+	blob := crypto.Keccak256(k.State, derivationId)
 	randID, newState := bigIntFromBytes(blob[:16]), blob[16:]
 
 	sessionPublicKey := RandPublicKey(k.MasterPublicKey, randID)
 
-	k.CurrentDerivation = id
+	k.CurrentDerivation = derivationId
 	k.State = newState
 
 	return sessionPublicKey, nil
@@ -540,7 +538,7 @@ func (k *SessionKey) MarshalJSONSecure(auth string, scryptN, scryptP int) ([]byt
 		return nil, err
 	}
 
-	encryptedKeyJSONV3 := encryptedSessionKeyJSONV3{
+	encryptedKeyJSONV3 := encryptedKeyJSONV3{
 		Address: hex.EncodeToString(k.address[:]),
 		Crypto:  cryptoStruct,
 		Id:      k.Id.String(),

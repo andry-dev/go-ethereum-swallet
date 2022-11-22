@@ -222,11 +222,11 @@ func decryptColdKey(keyjson []byte, data map[string]interface{}, auth string) (*
 		}
 		keyBytes, keyId, err = decryptKeyV1(k, auth)
 	} else {
-		k := new(encryptedColdKeyJSONV3)
+		k := new(encryptedKeyJSONV3)
 		if err := json.Unmarshal(keyjson, k); err != nil {
 			return nil, err
 		}
-		keyBytes, keyId, err = decryptColdKeyV3(k, auth)
+		keyBytes, keyId, err = decryptEncryptedKeyV3(k, auth)
 		state, err = hex.DecodeString(k.State)
 		derivation, err = hex.DecodeString(k.CurrentDerivation)
 	}
@@ -279,11 +279,11 @@ func decryptSessionKey(keyjson []byte, auth string) (*SessionKey, error) {
 		keyBytes, keyId []byte
 		err             error
 	)
-	k := new(encryptedSessionKeyJSONV3)
+	k := new(encryptedKeyJSONV3)
 	if err := json.Unmarshal(keyjson, k); err != nil {
 		return nil, err
 	}
-	keyBytes, keyId, err = decryptSessionKeyV3(k, auth)
+	keyBytes, keyId, err = decryptEncryptedKeyV3(k, auth)
 	// Handle any decryption errors and return the key
 	if err != nil {
 		return nil, err
@@ -336,23 +336,7 @@ func DecryptDataV3(cryptoJson CryptoJSON, auth string) ([]byte, error) {
 	return plainText, err
 }
 
-func decryptColdKeyV3(keyProtected *encryptedColdKeyJSONV3, auth string) (keyBytes []byte, keyId []byte, err error) {
-	if keyProtected.Version != version {
-		return nil, nil, fmt.Errorf("version not supported: %v", keyProtected.Version)
-	}
-	keyUUID, err := uuid.Parse(keyProtected.Id)
-	if err != nil {
-		return nil, nil, err
-	}
-	keyId = keyUUID[:]
-	plainText, err := DecryptDataV3(keyProtected.Crypto, auth)
-	if err != nil {
-		return nil, nil, err
-	}
-	return plainText, keyId, err
-}
-
-func decryptSessionKeyV3(keyProtected *encryptedSessionKeyJSONV3, auth string) (keyBytes []byte, keyId []byte, err error) {
+func decryptEncryptedKeyV3(keyProtected *encryptedKeyJSONV3, auth string) (keyBytes []byte, keyId []byte, err error) {
 	if keyProtected.Version != version {
 		return nil, nil, fmt.Errorf("version not supported: %v", keyProtected.Version)
 	}
