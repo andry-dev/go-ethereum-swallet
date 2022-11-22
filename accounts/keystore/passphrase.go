@@ -192,13 +192,13 @@ func DecryptKey(keyjson []byte, auth string) (Key, error) {
 		return nil, err
 	}
 
-	if keytype, ok := m["keytype"].(string); ok {
-		switch keytype {
-		case fmt.Sprint(ColdKeyType):
+	if keytype, ok := m["keytype"].(float64); ok {
+		switch KeyType(keytype) {
+		case ColdKeyType:
 			return decryptColdKey(keyjson, m, auth)
-		case fmt.Sprint(HotKeyType):
+		case HotKeyType:
 			return decryptHotKey(keyjson, auth)
-		case fmt.Sprint(SessionKeyType):
+		case SessionKeyType:
 			return decryptSessionKey(keyjson, auth)
 		}
 	}
