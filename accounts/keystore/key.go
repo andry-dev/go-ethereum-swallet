@@ -79,16 +79,14 @@ type ColdKey struct {
 	// privkey in this struct is always in plaintext
 	MasterPrivateKey *ecdsa.PrivateKey
 
-	State             []byte
-	CurrentDerivation []byte
+	State []byte
 }
 
 type HotKey struct {
-	Id                uuid.UUID
-	address           common.Address
-	MasterPublicKey   *ecdsa.PublicKey
-	State             []byte
-	CurrentDerivation []byte
+	Id              uuid.UUID
+	address         common.Address
+	MasterPublicKey *ecdsa.PublicKey
+	State           []byte
 }
 
 type SessionKey struct {
@@ -107,32 +105,29 @@ type keyStore interface {
 }
 
 type plainColdKeyJSON struct {
-	Address           string `json:"address"`
-	PrivateKey        string `json:"privatekey"`
-	Id                string `json:"id"`
-	State             string `json:"state"`
-	CurrentDerivation string `json:"derivation"`
-	Version           int    `json:"version"`
+	Address    string `json:"address"`
+	PrivateKey string `json:"privatekey"`
+	Id         string `json:"id"`
+	State      string `json:"state"`
+	Version    int    `json:"version"`
 }
 
 type encryptedKeyJSONV3 struct {
-	Address           string     `json:"address"`
-	Crypto            CryptoJSON `json:"crypto"`
-	Id                string     `json:"id"`
-	State             string     `json:"state"`
-	CurrentDerivation string     `json:"derivation"`
-	KeyType           int        `json:"keytype"`
-	Version           int        `json:"version"`
+	Address string     `json:"address"`
+	Crypto  CryptoJSON `json:"crypto"`
+	Id      string     `json:"id"`
+	State   string     `json:"state"`
+	KeyType int        `json:"keytype"`
+	Version int        `json:"version"`
 }
 
 type plainHotKeyJSONV3 struct {
-	Address           string `json:"address"`
-	PublicKey         string `json:"publickey"`
-	Id                string `json:"id"`
-	State             string `json:"state"`
-	CurrentDerivation string `json:"derivation"`
-	KeyType           int    `json:"keytype"`
-	Version           int    `json:"version"`
+	Address   string `json:"address"`
+	PublicKey string `json:"publickey"`
+	Id        string `json:"id"`
+	State     string `json:"state"`
+	KeyType   int    `json:"keytype"`
+	Version   int    `json:"version"`
 }
 
 type encryptedKeyJSONV1 struct {
@@ -161,7 +156,6 @@ func (k *ColdKey) MarshalJSON() (j []byte, err error) {
 		hex.EncodeToString(crypto.FromECDSA(k.MasterPrivateKey)),
 		k.Id.String(),
 		hex.EncodeToString(k.State),
-		hex.EncodeToString(k.CurrentDerivation),
 		version,
 	}
 	j, err = json.Marshal(jStruct)
@@ -195,15 +189,9 @@ func (k *ColdKey) UnmarshalJSON(j []byte) (err error) {
 		return err
 	}
 
-	currentID, err := hex.DecodeString(keyJSON.CurrentDerivation)
-	if err != nil {
-		return err
-	}
-
 	k.address = common.BytesToAddress(addr)
 	k.MasterPrivateKey = privkey
 	k.State = state
-	k.CurrentDerivation = currentID
 
 	return nil
 }
@@ -220,11 +208,10 @@ func newKeyFromECDSA(privateKeyECDSA *ecdsa.PrivateKey) *ColdKey {
 	}
 
 	key := &ColdKey{
-		Id:                id,
-		address:           crypto.PubkeyToAddress(privateKeyECDSA.PublicKey),
-		MasterPrivateKey:  privateKeyECDSA,
-		State:             state.Bytes(),
-		CurrentDerivation: []byte{},
+		Id:               id,
+		address:          crypto.PubkeyToAddress(privateKeyECDSA.PublicKey),
+		MasterPrivateKey: privateKeyECDSA,
+		State:            state.Bytes(),
 	}
 	return key
 }
@@ -264,11 +251,10 @@ func NewColdKey(uuid uuid.UUID, address common.Address, privateKey *ecdsa.Privat
 		panic(fmt.Sprintf("Could not create random state: %v", err))
 	}
 	return &ColdKey{
-		Id:                uuid,
-		address:           address,
-		MasterPrivateKey:  privateKey,
-		State:             state.Bytes(),
-		CurrentDerivation: []byte{},
+		Id:               uuid,
+		address:          address,
+		MasterPrivateKey: privateKey,
+		State:            state.Bytes(),
 	}
 }
 
@@ -278,11 +264,10 @@ func NewHotKey(uuid uuid.UUID, address common.Address, publicKey *ecdsa.PublicKe
 		panic(fmt.Sprintf("Could not create random state: %v", err))
 	}
 	return &HotKey{
-		Id:                uuid,
-		address:           address,
-		MasterPublicKey:   publicKey,
-		State:             state.Bytes(),
-		CurrentDerivation: []byte{},
+		Id:              uuid,
+		address:         address,
+		MasterPublicKey: publicKey,
+		State:           state.Bytes(),
 	}
 }
 
@@ -396,7 +381,6 @@ func (key *ColdKey) DerivePrivate(derivationId []byte) (*SessionKey, error) {
 	}
 	key.Id = keyUUID
 
-	key.CurrentDerivation = derivationId
 	key.State = newState
 
 	return &SessionKey{
@@ -418,11 +402,9 @@ func (k *ColdKey) GenerateHotKey() (*HotKey, error) {
 
 	mpk := k.MasterPrivateKey.PublicKey
 	state := k.State
-	derivation := k.CurrentDerivation
 	hotKey.Id = k.Id
 	hotKey.MasterPublicKey = &mpk
 	hotKey.State = state
-	hotKey.CurrentDerivation = derivation
 	hotKey.address = k.address
 
 	return &hotKey, nil
@@ -444,7 +426,6 @@ func (k *ColdKey) MarshalJSONSecure(auth string, scryptN, scryptP int) ([]byte, 
 		cryptoStruct,
 		k.Id.String(),
 		hex.EncodeToString(k.State),
-		hex.EncodeToString(k.CurrentDerivation),
 		int(ColdKeyType),
 		version,
 	}
@@ -476,7 +457,6 @@ func (k *HotKey) DerivePublic(derivationId []byte) (*ecdsa.PublicKey, error) {
 
 	sessionPublicKey := RandPublicKey(k.MasterPublicKey, randID)
 
-	k.CurrentDerivation = derivationId
 	k.State = newState
 
 	return sessionPublicKey, nil
@@ -492,13 +472,12 @@ func (k *HotKey) PathIdentifier() string {
 
 func (k *HotKey) MarshalJSONSecure(auth string, scryptN, scryptP int) ([]byte, error) {
 	plainKeyJSONV3 := plainHotKeyJSONV3{
-		Address:           hex.EncodeToString(k.address[:]),
-		Id:                k.Id.String(),
-		PublicKey:         hex.EncodeToString(crypto.FromECDSAPub(k.PublicKey())),
-		State:             hex.EncodeToString(k.State),
-		CurrentDerivation: hex.EncodeToString(k.CurrentDerivation),
-		KeyType:           int(HotKeyType),
-		Version:           version,
+		Address:   hex.EncodeToString(k.address[:]),
+		Id:        k.Id.String(),
+		PublicKey: hex.EncodeToString(crypto.FromECDSAPub(k.PublicKey())),
+		State:     hex.EncodeToString(k.State),
+		KeyType:   int(HotKeyType),
+		Version:   version,
 	}
 	return json.Marshal(plainKeyJSONV3)
 }

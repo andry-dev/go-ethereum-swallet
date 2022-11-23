@@ -228,7 +228,6 @@ func decryptColdKey(keyjson []byte, data map[string]interface{}, auth string) (*
 		}
 		keyBytes, keyId, err = decryptEncryptedKeyV3(k, auth)
 		state, err = hex.DecodeString(k.State)
-		derivation, err = hex.DecodeString(k.CurrentDerivation)
 	}
 	// Handle any decryption errors and return the key
 	if err != nil {
@@ -240,11 +239,10 @@ func decryptColdKey(keyjson []byte, data map[string]interface{}, auth string) (*
 		return nil, err
 	}
 	return &ColdKey{
-		Id:                id,
-		address:           crypto.PubkeyToAddress(key.PublicKey),
-		MasterPrivateKey:  key,
-		State:             state,
-		CurrentDerivation: derivation,
+		Id:               id,
+		address:          crypto.PubkeyToAddress(key.PublicKey),
+		MasterPrivateKey: key,
+		State:            state,
 	}, nil
 }
 
@@ -259,18 +257,16 @@ func decryptHotKey(keyjson []byte, auth string) (*HotKey, error) {
 	address, err := hex.DecodeString(k.Address)
 	publicKey, err := crypto.UnmarshalPubkey([]byte(k.PublicKey))
 	state, err := hex.DecodeString(k.State)
-	derivation, err := hex.DecodeString(k.CurrentDerivation)
 
 	if err != nil {
 		return nil, err
 	}
 
 	return &HotKey{
-		Id:                id,
-		address:           common.BytesToAddress(address),
-		MasterPublicKey:   publicKey,
-		State:             state,
-		CurrentDerivation: derivation,
+		Id:              id,
+		address:         common.BytesToAddress(address),
+		MasterPublicKey: publicKey,
+		State:           state,
 	}, nil
 }
 
