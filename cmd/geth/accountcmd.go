@@ -369,9 +369,11 @@ func accountConvert(ctx *cli.Context) error {
 	ks := stack.AccountManager().Backends(keystore.KeyStoreType)[0].(*keystore.KeyStore)
 
 	address := ctx.Args().Get(0)
-	account, passphrase := unlockAccount(ks, address, 0, nil)
+	account, coldPassphrase := unlockAccount(ks, address, 0, nil)
 
-	hotAccount, err := ks.GenerateHotWallet(account, passphrase)
+	hotPassphrase := utils.GetPassPhraseWithList("Please give a password for the hot key. Do not forget this password.", true, 0, nil)
+
+	hotAccount, err := ks.GenerateHotWallet(account, coldPassphrase, hotPassphrase)
 
 	if err != nil {
 		utils.Fatalf("Could not generate hot wallet: %v", err)

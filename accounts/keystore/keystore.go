@@ -24,7 +24,6 @@ import (
 	"crypto/ecdsa"
 	crand "crypto/rand"
 	"errors"
-	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -305,16 +304,14 @@ func (ks *KeyStore) DeriveSessionAccount(account accounts.Account, derivationID 
 	return sessionAccount, nil
 }
 
-func (ks *KeyStore) GenerateHotWallet(coldAccount accounts.Account, passphrase string) (accounts.Account, error) {
-	coldAccount, coldKey, err := ks.getDecryptedKey(coldAccount, passphrase)
+func (ks *KeyStore) GenerateHotWallet(coldAccount accounts.Account, coldPassphrase, hotPassphrase string) (accounts.Account, error) {
+	coldAccount, coldKey, err := ks.getDecryptedKey(coldAccount, coldPassphrase)
 
 	if err != nil {
 		return accounts.Account{}, err
 	}
 
 	hotKey, err := coldKey.GenerateHotKey()
-
-	fmt.Println(hotKey)
 
 	if err != nil {
 		return accounts.Account{}, err
@@ -328,7 +325,7 @@ func (ks *KeyStore) GenerateHotWallet(coldAccount accounts.Account, passphrase s
 		},
 	}
 
-	if err := ks.storage.StoreKey(hotAccount.URL.Path, hotKey, passphrase); err != nil {
+	if err := ks.storage.StoreKey(hotAccount.URL.Path, hotKey, hotPassphrase); err != nil {
 		return accounts.Account{}, err
 	}
 

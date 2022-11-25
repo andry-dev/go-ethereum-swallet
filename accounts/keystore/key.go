@@ -36,6 +36,8 @@ import (
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/google/uuid"
+
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 const (
@@ -112,22 +114,21 @@ type plainColdKeyJSON struct {
 	Version    int    `json:"version"`
 }
 
+type encryptedHotKeyJSONV3 struct {
+	Address   string     `json:"address"`
+	PublicKey string     `json:"publickey"`
+	Crypto    CryptoJSON `json:"crypto"`
+	Id        string     `jsson:"id"`
+	KeyType   int        `json:"keytype"`
+	Version   int        `json:"version"`
+}
+
 type encryptedKeyJSONV3 struct {
 	Address string     `json:"address"`
 	Crypto  CryptoJSON `json:"crypto"`
 	Id      string     `json:"id"`
-	State   string     `json:"state"`
 	KeyType int        `json:"keytype"`
 	Version int        `json:"version"`
-}
-
-type plainHotKeyJSONV3 struct {
-	Address   string `json:"address"`
-	PublicKey string `json:"publickey"`
-	Id        string `json:"id"`
-	State     string `json:"state"`
-	KeyType   int    `json:"keytype"`
-	Version   int    `json:"version"`
 }
 
 type encryptedKeyJSONV1 struct {
@@ -144,6 +145,14 @@ type CryptoJSON struct {
 	KDF          string                 `json:"kdf"`
 	KDFParams    map[string]interface{} `json:"kdfparams"`
 	MAC          string                 `json:"mac"`
+}
+
+// Structure of ciphertext of the key and the state
+// Used for encoding/decoding to/from msgpack so the ciphertext can be
+// efficiently packed inside the JSON without writing custom binary formats.
+type keyCiphertext struct {
+	privateKey []byte
+	state      []byte
 }
 
 type cipherparamsJSON struct {
@@ -415,7 +424,17 @@ func (k *ColdKey) PathIdentifier() string {
 }
 
 func (k *ColdKey) MarshalJSONSecure(auth string, scryptN, scryptP int) ([]byte, error) {
-	keyBytes := math.PaddedBigBytes(k.MasterPrivateKey.D, 32)
+	plaintext := keyCiphertext{
+		privateKey: math.PaddedBigBytes(k.MasterPrivateKey.D, 32),
+		state:      k.State,
+	}
+
+	keyBytes, err := msgpack.Marshal(plaintext)
+
+	if err != nil {
+		panic(err)
+	}
+
 	cryptoStruct, err := EncryptDataV3(keyBytes, []byte(auth), scryptN, scryptP)
 	if err != nil {
 		return nil, err
@@ -425,7 +444,6 @@ func (k *ColdKey) MarshalJSONSecure(auth string, scryptN, scryptP int) ([]byte, 
 		hex.EncodeToString(k.address[:]),
 		cryptoStruct,
 		k.Id.String(),
-		hex.EncodeToString(k.State),
 		int(ColdKeyType),
 		version,
 	}
@@ -471,15 +489,31 @@ func (k *HotKey) PathIdentifier() string {
 }
 
 func (k *HotKey) MarshalJSONSecure(auth string, scryptN, scryptP int) ([]byte, error) {
-	plainKeyJSONV3 := plainHotKeyJSONV3{
+	plaintext := keyCiphertext{
+		privateKey: []byte{}, // Hot key doesn't have a private key.
+		state:      k.State,
+	}
+
+	keyBytes, err := msgpack.Marshal(plaintext)
+
+	if err != nil {
+		panic(err)
+	}
+
+	cryptoStruct, err := EncryptDataV3(keyBytes, []byte(auth), scryptN, scryptP)
+	if err != nil {
+		return nil, err
+	}
+
+	encryptedKeyJSONV3 := encryptedHotKeyJSONV3{
 		Address:   hex.EncodeToString(k.address[:]),
+		PublicKey: hex.EncodeToString(crypto.FromECDSAPub(k.MasterPublicKey)),
+		Crypto:    cryptoStruct,
 		Id:        k.Id.String(),
-		PublicKey: hex.EncodeToString(crypto.FromECDSAPub(k.PublicKey())),
-		State:     hex.EncodeToString(k.State),
 		KeyType:   int(HotKeyType),
 		Version:   version,
 	}
-	return json.Marshal(plainKeyJSONV3)
+	return json.Marshal(encryptedKeyJSONV3)
 }
 
 func (k *SessionKey) Address() common.Address {
@@ -511,7 +545,16 @@ func (k *SessionKey) PathIdentifier() string {
 }
 
 func (k *SessionKey) MarshalJSONSecure(auth string, scryptN, scryptP int) ([]byte, error) {
-	keyBytes := math.PaddedBigBytes(k.privateKey.D, 32)
+	plaintext := keyCiphertext{
+		privateKey: math.PaddedBigBytes(k.privateKey.D, 32),
+		state:      []byte{},
+	}
+
+	keyBytes, err := msgpack.Marshal(plaintext)
+
+	if err != nil {
+		panic(err)
+	}
 	cryptoStruct, err := EncryptDataV3(keyBytes, []byte(auth), scryptN, scryptP)
 	if err != nil {
 		return nil, err

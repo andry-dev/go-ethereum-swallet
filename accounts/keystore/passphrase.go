@@ -41,6 +41,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/google/uuid"
+	"github.com/vmihailenco/msgpack/v5"
 	"golang.org/x/crypto/pbkdf2"
 	"golang.org/x/crypto/scrypt"
 )
@@ -211,29 +212,28 @@ func DecryptKey(keyjson []byte, auth string) (Key, error) {
 func decryptColdKey(keyjson []byte, data map[string]interface{}, auth string) (*ColdKey, error) {
 	// Depending on the version try to parse one way or another
 	var (
-		keyBytes, keyId   []byte
-		state, derivation []byte
-		err               error
+		decodedKey keyCiphertext
+		keyId      []byte
+		err        error
 	)
 	if version, ok := data["version"].(string); ok && version == "1" {
 		k := new(encryptedKeyJSONV1)
 		if err := json.Unmarshal(keyjson, k); err != nil {
 			return nil, err
 		}
-		keyBytes, keyId, err = decryptKeyV1(k, auth)
+		decodedKey.privateKey, keyId, err = decryptKeyV1(k, auth)
 	} else {
 		k := new(encryptedKeyJSONV3)
 		if err := json.Unmarshal(keyjson, k); err != nil {
 			return nil, err
 		}
-		keyBytes, keyId, err = decryptEncryptedKeyV3(k, auth)
-		state, err = hex.DecodeString(k.State)
+		decodedKey, keyId, err = decryptEncryptedKeyV3(k, auth)
 	}
 	// Handle any decryption errors and return the key
 	if err != nil {
 		return nil, err
 	}
-	key := crypto.ToECDSAUnsafe(keyBytes)
+	key := crypto.ToECDSAUnsafe(decodedKey.privateKey)
 	id, err := uuid.FromBytes(keyId)
 	if err != nil {
 		return nil, err
@@ -242,12 +242,12 @@ func decryptColdKey(keyjson []byte, data map[string]interface{}, auth string) (*
 		Id:               id,
 		address:          crypto.PubkeyToAddress(key.PublicKey),
 		MasterPrivateKey: key,
-		State:            state,
+		State:            decodedKey.state,
 	}, nil
 }
 
 func decryptHotKey(keyjson []byte, auth string) (*HotKey, error) {
-	k := new(plainHotKeyJSONV3)
+	k := new(encryptedHotKeyJSONV3)
 
 	if err := json.Unmarshal(keyjson, k); err != nil {
 		return nil, err
@@ -256,7 +256,14 @@ func decryptHotKey(keyjson []byte, auth string) (*HotKey, error) {
 	id, err := uuid.Parse(k.Id)
 	address, err := hex.DecodeString(k.Address)
 	publicKey, err := crypto.UnmarshalPubkey([]byte(k.PublicKey))
-	state, err := hex.DecodeString(k.State)
+	plaintext, err := DecryptDataV3(k.Crypto, auth)
+
+	if err != nil {
+		return nil, err
+	}
+
+	var decodedKey keyCiphertext
+	err = msgpack.Unmarshal(plaintext, &decodedKey)
 
 	if err != nil {
 		return nil, err
@@ -266,25 +273,21 @@ func decryptHotKey(keyjson []byte, auth string) (*HotKey, error) {
 		Id:              id,
 		address:         common.BytesToAddress(address),
 		MasterPublicKey: publicKey,
-		State:           state,
+		State:           decodedKey.state,
 	}, nil
 }
 
 func decryptSessionKey(keyjson []byte, auth string) (*SessionKey, error) {
-	var (
-		keyBytes, keyId []byte
-		err             error
-	)
 	k := new(encryptedKeyJSONV3)
 	if err := json.Unmarshal(keyjson, k); err != nil {
 		return nil, err
 	}
-	keyBytes, keyId, err = decryptEncryptedKeyV3(k, auth)
+	decodedKey, keyId, err := decryptEncryptedKeyV3(k, auth)
 	// Handle any decryption errors and return the key
 	if err != nil {
 		return nil, err
 	}
-	key := crypto.ToECDSAUnsafe(keyBytes)
+	key := crypto.ToECDSAUnsafe(decodedKey.privateKey)
 	id, err := uuid.FromBytes(keyId)
 	if err != nil {
 		return nil, err
@@ -332,20 +335,22 @@ func DecryptDataV3(cryptoJson CryptoJSON, auth string) ([]byte, error) {
 	return plainText, err
 }
 
-func decryptEncryptedKeyV3(keyProtected *encryptedKeyJSONV3, auth string) (keyBytes []byte, keyId []byte, err error) {
+func decryptEncryptedKeyV3(keyProtected *encryptedKeyJSONV3, auth string) (decodedKey keyCiphertext, keyId []byte, err error) {
 	if keyProtected.Version != version {
-		return nil, nil, fmt.Errorf("version not supported: %v", keyProtected.Version)
+		return keyCiphertext{}, nil, fmt.Errorf("version not supported: %v", keyProtected.Version)
 	}
 	keyUUID, err := uuid.Parse(keyProtected.Id)
 	if err != nil {
-		return nil, nil, err
+		return keyCiphertext{}, nil, err
 	}
 	keyId = keyUUID[:]
 	plainText, err := DecryptDataV3(keyProtected.Crypto, auth)
 	if err != nil {
-		return nil, nil, err
+		return keyCiphertext{}, nil, err
 	}
-	return plainText, keyId, err
+
+	err = msgpack.Unmarshal(plainText, &decodedKey)
+	return decodedKey, keyId, err
 }
 
 func decryptKeyV1(keyProtected *encryptedKeyJSONV1, auth string) (keyBytes []byte, keyId []byte, err error) {

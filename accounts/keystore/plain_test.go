@@ -119,7 +119,7 @@ func TestImportPreSaleKey(t *testing.T) {
 // Test and utils for the key store tests in the Ethereum JSON tests;
 // testdataKeyStoreTests/basic_tests.json
 type KeyStoreTestV3 struct {
-	Json     encryptedColdKeyJSONV3
+	Json     encryptedKeyJSONV3
 	Password string
 	Priv     string
 }
@@ -202,11 +202,11 @@ func TestV1_2(t *testing.T) {
 }
 
 func testDecryptV3(test KeyStoreTestV3, t *testing.T) {
-	privBytes, _, err := decryptColdKeyV3(&test.Json, test.Password)
+	privBytes, _, err := decryptEncryptedKeyV3(&test.Json, test.Password)
 	if err != nil {
 		t.Fatal(err)
 	}
-	privHex := hex.EncodeToString(privBytes)
+	privHex := hex.EncodeToString(privBytes.privateKey)
 	if test.Priv != privHex {
 		t.Fatal(fmt.Errorf("Decrypted bytes not equal to test, expected %v have %v", test.Priv, privHex))
 	}
