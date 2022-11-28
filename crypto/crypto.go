@@ -35,11 +35,17 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
-// SignatureLength indicates the byte length required to carry a signature with recovery id.
-const SignatureLength = 64 + 1 // 64 bytes ECDSA signature + 1 byte recovery id
+// NonceLength is the length of the generated nonce at the start of the ECDSA signature
+const NonceLength = 16
+
+// ECDSASignatureLength indicates the byte length required to carry a signature with recovery id.
+const ECDSASignatureLength = 64
+
+// SignatureLength indicates the byte length required to carry a signature with recovery id and the nonce.
+const SignatureLength = NonceLength + ECDSASignatureLength + 1 // 64 bytes ECDSA signature + 1 byte recovery id
 
 // RecoveryIDOffset points to the byte offset within the signature that contains the recovery id.
-const RecoveryIDOffset = 64
+const RecoveryIDOffset = NonceLength + ECDSASignatureLength
 
 // DigestLength sets the signature digest exact length
 const DigestLength = 32

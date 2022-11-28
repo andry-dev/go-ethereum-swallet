@@ -50,8 +50,6 @@ var (
 	ErrNoHotKeyGeneration = errors.New("can't generate hot key: key is hot or session")
 )
 
-const keyLength = 128
-
 type KeyType int8
 
 const (
@@ -59,6 +57,8 @@ const (
 	HotKeyType
 	SessionKeyType
 )
+
+const stateLength = 16
 
 type Key interface {
 	Address() common.Address
@@ -211,7 +211,8 @@ func newKeyFromECDSA(privateKeyECDSA *ecdsa.PrivateKey) *ColdKey {
 		panic(fmt.Sprintf("Could not create random uuid: %v", err))
 	}
 
-	state, err := rand.Int(rand.Reader, math.BigPow(2, keyLength))
+	state := make([]byte, stateLength)
+	_, err = rand.Read(state)
 	if err != nil {
 		panic(fmt.Sprintf("Could not create random state: %v", err))
 	}
@@ -220,7 +221,7 @@ func newKeyFromECDSA(privateKeyECDSA *ecdsa.PrivateKey) *ColdKey {
 		Id:               id,
 		address:          crypto.PubkeyToAddress(privateKeyECDSA.PublicKey),
 		MasterPrivateKey: privateKeyECDSA,
-		State:            state.Bytes(),
+		State:            state,
 	}
 	return key
 }
@@ -255,7 +256,8 @@ func newKey(rand io.Reader) (*ColdKey, error) {
 }
 
 func NewColdKey(uuid uuid.UUID, address common.Address, privateKey *ecdsa.PrivateKey) *ColdKey {
-	state, err := rand.Int(rand.Reader, math.BigPow(2, keyLength))
+	state := make([]byte, stateLength)
+	_, err := rand.Read(state)
 	if err != nil {
 		panic(fmt.Sprintf("Could not create random state: %v", err))
 	}
@@ -263,12 +265,13 @@ func NewColdKey(uuid uuid.UUID, address common.Address, privateKey *ecdsa.Privat
 		Id:               uuid,
 		address:          address,
 		MasterPrivateKey: privateKey,
-		State:            state.Bytes(),
+		State:            state,
 	}
 }
 
 func NewHotKey(uuid uuid.UUID, address common.Address, publicKey *ecdsa.PublicKey) *HotKey {
-	state, err := rand.Int(rand.Reader, math.BigPow(2, keyLength))
+	state := make([]byte, stateLength)
+	_, err := rand.Read(state)
 	if err != nil {
 		panic(fmt.Sprintf("Could not create random state: %v", err))
 	}
@@ -276,7 +279,7 @@ func NewHotKey(uuid uuid.UUID, address common.Address, publicKey *ecdsa.PublicKe
 		Id:              uuid,
 		address:         address,
 		MasterPublicKey: publicKey,
-		State:           state.Bytes(),
+		State:           state,
 	}
 }
 
@@ -309,51 +312,6 @@ func RandPublicKey(masterPublicKey *ecdsa.PublicKey, id *big.Int) *ecdsa.PublicK
 	pk.X, pk.Y = masterPublicKey.ScalarMult(masterPublicKey.X, masterPublicKey.Y, id.Bytes())
 
 	return pk
-}
-
-// Creates the hash of a message from a session public key.
-func sessionMessageHash(pk *ecdsa.PublicKey, nonce *big.Int, message []byte) []byte {
-	messageHashState := crypto.NewKeccakState()
-	messageHashState.Write(pk.X.Bytes())
-	messageHashState.Write(pk.Y.Bytes())
-	messageHashState.Write(nonce.Bytes())
-	messageHashState.Write(message)
-	return messageHashState.Sum(nil)
-}
-
-// Signs a message with the session secret ECDSA key generated from
-// RandSecretKey.
-//
-// Returns a pair composed of a nonce and the signature.
-func SessionSign(sessionSecretKey *SessionKey, message []byte) (nonce *big.Int, sig []byte) {
-	nonce, err := rand.Int(rand.Reader, math.BigPow(2, keyLength))
-	if err != nil {
-		panic(err)
-	}
-
-	pk := sessionSecretKey.PublicKey()
-
-	message = sessionMessageHash(pk, nonce, message)
-
-	sig, err = crypto.Sign(message, sessionSecretKey.privateKey)
-	if err != nil {
-		panic(err)
-	}
-
-	return nonce, sig
-}
-
-// Verifies the signature of a message with the given session public key and nonce.
-func SessionVerify(sessionPublicKey *ecdsa.PublicKey, nonce *big.Int, signature []byte, message []byte) bool {
-	pk := sessionPublicKey
-	message = sessionMessageHash(pk, nonce, message)
-
-	// VerifySignature requires a SEC 1 encoded public key blob and a 64 byte
-	// signature, so we convert those.
-	pkblob := crypto.FromECDSAPub(pk)
-	// Remove 1 byte from the signature to get [R || S] representation.
-	signature = signature[:len(signature)-1]
-	return crypto.VerifySignature(pkblob, message, signature)
 }
 
 func bigIntFromBytes(b []byte) *big.Int {

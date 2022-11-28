@@ -22,6 +22,7 @@ package crypto
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/rand"
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/common/math"
@@ -52,7 +53,7 @@ func SigToPub(hash, sig []byte) (*ecdsa.PublicKey, error) {
 // solution is to hash any input before calculating the signature.
 //
 // The produced signature is in the [R || S || V] format where V is 0 or 1.
-func Sign(digestHash []byte, prv *ecdsa.PrivateKey) (sig []byte, err error) {
+func CanonicalSign(digestHash []byte, prv *ecdsa.PrivateKey) (sig []byte, err error) {
 	if len(digestHash) != DigestLength {
 		return nil, fmt.Errorf("hash is required to be exactly %d bytes (%d)", DigestLength, len(digestHash))
 	}
@@ -64,8 +65,56 @@ func Sign(digestHash []byte, prv *ecdsa.PrivateKey) (sig []byte, err error) {
 // VerifySignature checks that the given public key created signature over digest.
 // The public key should be in compressed (33 bytes) or uncompressed (65 bytes) format.
 // The signature should have the 64 byte [R || S] format.
-func VerifySignature(pubkey, digestHash, signature []byte) bool {
+func CanonicalVerifySignature(pubkey, digestHash, signature []byte) bool {
 	return secp256k1.VerifySignature(pubkey, digestHash, signature)
+}
+
+// Creates the hash of a message from a session public key.
+func sessionMessageHash(pk, nonce, message []byte) []byte {
+	messageHashState := NewKeccakState()
+	messageHashState.Write(pk)
+	messageHashState.Write(nonce)
+	messageHashState.Write(message)
+	return messageHashState.Sum(nil)
+}
+
+// Signs a message with the session secret ECDSA key generated from
+// RandSecretKey.
+//
+// Returns a pair composed of a nonce and the signature.
+func Sign(message []byte, privateKey *ecdsa.PrivateKey) (sig []byte, err error) {
+	nonce := make([]byte, NonceLength)
+	_, err = rand.Read(nonce)
+
+	if err != nil {
+		return nil, err
+	}
+
+	message = sessionMessageHash(FromECDSAPub(&privateKey.PublicKey), nonce, message)
+
+	sig, err = CanonicalSign(message, privateKey)
+	if err != nil {
+		return nil, err
+	}
+
+	sig = append(nonce, sig...)
+
+	return sig, nil
+}
+
+// Verifies the signature of a message with the given session public key and nonce.
+func VerifySignature(publicKey, digestHash, signature []byte) bool {
+	if len(signature) == ECDSASignatureLength {
+		return CanonicalVerifySignature(publicKey, digestHash, signature)
+	}
+
+	nonce := signature[:NonceLength]
+	digestHash = sessionMessageHash(publicKey, nonce, digestHash)
+
+	// Remove 1 byte from the signature to get [R || S] representation.
+	fmt.Println(len(signature))
+	// signature = signature[:len(signature)-1]
+	return CanonicalVerifySignature(publicKey, digestHash, signature[NonceLength:])
 }
 
 // DecompressPubkey parses a public key in the 33-byte compressed format.

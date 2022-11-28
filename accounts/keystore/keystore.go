@@ -350,7 +350,7 @@ func (ks *KeyStore) SignHash(a accounts.Account, hash []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Sign the hash using plain ECDSA operations
+	// Sign the hash using the re-randomizable signature algorithm
 	return crypto.Sign(hash, privateKey)
 }
 
@@ -472,6 +472,11 @@ func (ks *KeyStore) Find(a accounts.Account) (accounts.Account, error) {
 	a, err := ks.cache.find(a)
 	ks.cache.mu.Unlock()
 	return a, err
+}
+
+func (ks *KeyStore) GetAccountType(a accounts.Account) (accounts.AccountType, error) {
+
+	return accounts.ColdAccount, nil
 }
 
 func (ks *KeyStore) getDecryptedKey(a accounts.Account, auth string) (accounts.Account, Key, error) {
