@@ -334,6 +334,7 @@ func accountCreate(ctx *cli.Context) error {
 	return nil
 }
 
+// accountDerive derives a session account from a cold one.
 func accountDerive(ctx *cli.Context) error {
 	if ctx.Args().Len() < 2 {
 		utils.Fatalf("No accounts and/or derivation ID specified")
@@ -360,6 +361,10 @@ func accountDerive(ctx *cli.Context) error {
 	return nil
 }
 
+// accountConvert converts a cold account to an hot one.
+//
+// It is used to export the public key of a cold account along with the current
+// state so that a shared session account can be generated from them.
 func accountConvert(ctx *cli.Context) error {
 	if ctx.Args().Len() != 1 {
 		utils.Fatalf("No account specified")
