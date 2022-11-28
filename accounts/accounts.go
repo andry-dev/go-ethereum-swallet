@@ -28,11 +28,20 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
+type AccountType uint8
+
+const (
+	ColdAccount AccountType = iota
+	HotAccount
+	SessionAccount
+)
+
 // Account represents an Ethereum account located at a specific location defined
 // by the optional URL field.
 type Account struct {
 	Address common.Address `json:"address"` // Ethereum account address derived from the key
 	URL     URL            `json:"url"`     // Optional resource locator within a backend
+	Type    AccountType    `json:"type"`
 }
 
 const (
