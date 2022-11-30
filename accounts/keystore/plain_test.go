@@ -206,7 +206,7 @@ func testDecryptV3(test KeyStoreTestV3, t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	privHex := hex.EncodeToString(privBytes.privateKey)
+	privHex := hex.EncodeToString(privBytes.PrivateKey)
 	if test.Priv != privHex {
 		t.Fatal(fmt.Errorf("Decrypted bytes not equal to test, expected %v have %v", test.Priv, privHex))
 	}

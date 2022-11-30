@@ -34,6 +34,7 @@ const (
 	ColdAccount AccountType = iota
 	HotAccount
 	SessionAccount
+	HotSessionAccount
 )
 
 // Account represents an Ethereum account located at a specific location defined

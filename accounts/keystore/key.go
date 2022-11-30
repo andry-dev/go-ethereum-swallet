@@ -56,6 +56,7 @@ const (
 	ColdKeyType KeyType = iota
 	HotKeyType
 	SessionKeyType
+	HotSessionKeyType
 )
 
 const stateLength = 16
@@ -66,7 +67,7 @@ type Key interface {
 	PublicKey() *ecdsa.PublicKey
 
 	DerivePrivate(id []byte) (*SessionKey, error)
-	DerivePublic(id []byte) (*ecdsa.PublicKey, error)
+	DerivePublic(id []byte) (*HotSessionKey, error)
 	GenerateHotKey() (*HotKey, error)
 	PathIdentifier() string
 
@@ -97,6 +98,12 @@ type SessionKey struct {
 	privateKey *ecdsa.PrivateKey
 }
 
+type HotSessionKey struct {
+	Id        uuid.UUID
+	address   common.Address
+	publicKey *ecdsa.PublicKey
+}
+
 type keyStore interface {
 	// Loads and decrypts the key from disk.
 	GetKey(addr common.Address, filename string, auth string) (Key, error)
@@ -112,6 +119,14 @@ type plainColdKeyJSON struct {
 	Id         string `json:"id"`
 	State      string `json:"state"`
 	Version    int    `json:"version"`
+}
+
+type plainKeyJSONV3 struct {
+	Address   string `json:"address"`
+	PublicKey string `json:"publickey"`
+	Id        string `json:"id"`
+	KeyType   int    `json:"keytype"`
+	Version   int    `json:"version"`
 }
 
 type encryptedHotKeyJSONV3 struct {
@@ -151,8 +166,8 @@ type CryptoJSON struct {
 // Used for encoding/decoding to/from msgpack so the ciphertext can be
 // efficiently packed inside the JSON without writing custom binary formats.
 type keyCiphertext struct {
-	privateKey []byte
-	state      []byte
+	PrivateKey []byte
+	State      []byte
 }
 
 type cipherparamsJSON struct {
@@ -346,17 +361,17 @@ func (key *ColdKey) DerivePrivate(derivationId []byte) (*SessionKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	key.Id = keyUUID
 
 	key.State = newState
 
 	return &SessionKey{
 		address:    crypto.PubkeyToAddress(sessionSecretKey.PublicKey),
 		privateKey: sessionSecretKey,
+		Id:         keyUUID,
 	}, nil
 }
 
-func (k *ColdKey) DerivePublic(id []byte) (*ecdsa.PublicKey, error) {
+func (k *ColdKey) DerivePublic(id []byte) (*HotSessionKey, error) {
 	hotKey, _ := k.GenerateHotKey()
 	return hotKey.DerivePublic(id)
 }
@@ -383,11 +398,11 @@ func (k *ColdKey) PathIdentifier() string {
 
 func (k *ColdKey) MarshalJSONSecure(auth string, scryptN, scryptP int) ([]byte, error) {
 	plaintext := keyCiphertext{
-		privateKey: math.PaddedBigBytes(k.MasterPrivateKey.D, 32),
-		state:      k.State,
+		PrivateKey: math.PaddedBigBytes(k.MasterPrivateKey.D, 32),
+		State:      k.State,
 	}
 
-	keyBytes, err := msgpack.Marshal(plaintext)
+	keyBytes, err := msgpack.Marshal(&plaintext)
 
 	if err != nil {
 		panic(err)
@@ -427,7 +442,7 @@ func (k *HotKey) DerivePrivate(id []byte) (*SessionKey, error) {
 // Derives a session public key for session identifier id.
 //
 // Returns the generated session public key.
-func (k *HotKey) DerivePublic(derivationId []byte) (*ecdsa.PublicKey, error) {
+func (k *HotKey) DerivePublic(derivationId []byte) (*HotSessionKey, error) {
 	blob := crypto.Keccak256(k.State, derivationId)
 	randID, newState := bigIntFromBytes(blob[:16]), blob[16:]
 
@@ -435,7 +450,18 @@ func (k *HotKey) DerivePublic(derivationId []byte) (*ecdsa.PublicKey, error) {
 
 	k.State = newState
 
-	return sessionPublicKey, nil
+	keyUUID, err := uuid.NewRandom()
+	if err != nil {
+		return nil, err
+	}
+
+	sessionKey := &HotSessionKey{
+		Id:        keyUUID,
+		address:   crypto.PubkeyToAddress(*sessionPublicKey),
+		publicKey: sessionPublicKey,
+	}
+
+	return sessionKey, nil
 }
 
 func (k *HotKey) GenerateHotKey() (*HotKey, error) {
@@ -448,8 +474,8 @@ func (k *HotKey) PathIdentifier() string {
 
 func (k *HotKey) MarshalJSONSecure(auth string, scryptN, scryptP int) ([]byte, error) {
 	plaintext := keyCiphertext{
-		privateKey: []byte{}, // Hot key doesn't have a private key.
-		state:      k.State,
+		PrivateKey: []byte{}, // Hot key doesn't have a private key.
+		State:      k.State,
 	}
 
 	keyBytes, err := msgpack.Marshal(plaintext)
@@ -490,7 +516,7 @@ func (k *SessionKey) DerivePrivate(id []byte) (*SessionKey, error) {
 	return nil, ErrNotDerivable
 }
 
-func (k *SessionKey) DerivePublic(id []byte) (*ecdsa.PublicKey, error) {
+func (k *SessionKey) DerivePublic(id []byte) (*HotSessionKey, error) {
 	return nil, ErrNotDerivable
 }
 
@@ -504,8 +530,8 @@ func (k *SessionKey) PathIdentifier() string {
 
 func (k *SessionKey) MarshalJSONSecure(auth string, scryptN, scryptP int) ([]byte, error) {
 	plaintext := keyCiphertext{
-		privateKey: math.PaddedBigBytes(k.privateKey.D, 32),
-		state:      []byte{},
+		PrivateKey: math.PaddedBigBytes(k.privateKey.D, 32),
+		State:      []byte{},
 	}
 
 	keyBytes, err := msgpack.Marshal(plaintext)
@@ -547,6 +573,46 @@ func writeTemporaryKeyFile(file string, content []byte) (string, error) {
 	}
 	f.Close()
 	return f.Name(), nil
+}
+
+func (k *HotSessionKey) Address() common.Address {
+	return k.address
+}
+
+func (k *HotSessionKey) PrivateKey() (*ecdsa.PrivateKey, error) {
+	return nil, ErrNoPrivateKey
+}
+
+func (k *HotSessionKey) PublicKey() *ecdsa.PublicKey {
+	return k.publicKey
+}
+
+func (k *HotSessionKey) DerivePrivate(id []byte) (*SessionKey, error) {
+	return nil, ErrNotDerivable
+}
+
+func (k *HotSessionKey) DerivePublic(id []byte) (*HotSessionKey, error) {
+	return nil, ErrNotDerivable
+}
+
+func (k *HotSessionKey) GenerateHotKey() (*HotKey, error) {
+	return nil, ErrNoHotKeyGeneration
+}
+
+func (k *HotSessionKey) PathIdentifier() string {
+	return "HOT-SESSION"
+}
+
+func (k *HotSessionKey) MarshalJSONSecure(auth string, scryptN, scryptP int) ([]byte, error) {
+	plainKey := plainKeyJSONV3{
+		Address:   hex.EncodeToString(k.address[:]),
+		PublicKey: hex.EncodeToString(crypto.FromECDSAPub(k.publicKey)),
+		Id:        k.Id.String(),
+		KeyType:   int(HotSessionKeyType),
+		Version:   version,
+	}
+
+	return json.Marshal(plainKey)
 }
 
 func storeNewKey(ks keyStore, rand io.Reader, auth string) (Key, accounts.Account, error) {

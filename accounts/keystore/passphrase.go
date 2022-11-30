@@ -201,6 +201,8 @@ func DecryptKey(keyjson []byte, auth string) (Key, error) {
 			return decryptHotKey(keyjson, auth)
 		case SessionKeyType:
 			return decryptSessionKey(keyjson, auth)
+		case HotSessionKeyType:
+			return decryptHotSessionKey(keyjson, auth)
 		}
 	}
 
@@ -221,7 +223,7 @@ func decryptColdKey(keyjson []byte, data map[string]interface{}, auth string) (*
 		if err := json.Unmarshal(keyjson, k); err != nil {
 			return nil, err
 		}
-		decodedKey.privateKey, keyId, err = decryptKeyV1(k, auth)
+		decodedKey.PrivateKey, keyId, err = decryptKeyV1(k, auth)
 	} else {
 		k := new(encryptedKeyJSONV3)
 		if err := json.Unmarshal(keyjson, k); err != nil {
@@ -233,7 +235,7 @@ func decryptColdKey(keyjson []byte, data map[string]interface{}, auth string) (*
 	if err != nil {
 		return nil, err
 	}
-	key := crypto.ToECDSAUnsafe(decodedKey.privateKey)
+	key := crypto.ToECDSAUnsafe(decodedKey.PrivateKey)
 	id, err := uuid.FromBytes(keyId)
 	if err != nil {
 		return nil, err
@@ -242,7 +244,7 @@ func decryptColdKey(keyjson []byte, data map[string]interface{}, auth string) (*
 		Id:               id,
 		address:          crypto.PubkeyToAddress(key.PublicKey),
 		MasterPrivateKey: key,
-		State:            decodedKey.state,
+		State:            decodedKey.State,
 	}, nil
 }
 
@@ -273,7 +275,7 @@ func decryptHotKey(keyjson []byte, auth string) (*HotKey, error) {
 		Id:              id,
 		address:         common.BytesToAddress(address),
 		MasterPublicKey: publicKey,
-		State:           decodedKey.state,
+		State:           decodedKey.State,
 	}, nil
 }
 
@@ -287,7 +289,7 @@ func decryptSessionKey(keyjson []byte, auth string) (*SessionKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	key := crypto.ToECDSAUnsafe(decodedKey.privateKey)
+	key := crypto.ToECDSAUnsafe(decodedKey.PrivateKey)
 	id, err := uuid.FromBytes(keyId)
 	if err != nil {
 		return nil, err
@@ -296,6 +298,28 @@ func decryptSessionKey(keyjson []byte, auth string) (*SessionKey, error) {
 		Id:         id,
 		address:    crypto.PubkeyToAddress(key.PublicKey),
 		privateKey: key,
+	}, nil
+}
+
+func decryptHotSessionKey(keyjson []byte, auth string) (*HotSessionKey, error) {
+	k := new(plainKeyJSONV3)
+
+	if err := json.Unmarshal(keyjson, k); err != nil {
+		return nil, err
+	}
+
+	id, err := uuid.Parse(k.Id)
+	address, err := hex.DecodeString(k.Address)
+	publicKey, err := crypto.UnmarshalPubkey([]byte(k.PublicKey))
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &HotSessionKey{
+		address:   common.BytesToAddress(address),
+		Id:        id,
+		publicKey: publicKey,
 	}, nil
 }
 

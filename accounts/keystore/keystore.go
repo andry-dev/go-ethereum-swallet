@@ -263,21 +263,50 @@ func (ks *KeyStore) Delete(a accounts.Account, passphrase string) error {
 	return err
 }
 
+func getAccountTypeFromKey(key Key) (accounts.AccountType, error) {
+	switch key.(type) {
+	case *ColdKey:
+		return accounts.ColdAccount, nil
+	case *HotKey:
+		return accounts.HotAccount, nil
+	case *SessionKey:
+		return accounts.SessionAccount, nil
+
+	case *HotSessionKey:
+		return accounts.HotSessionAccount, nil
+	}
+
+	return 0, errors.New("unknown account type")
+}
+
+func (ks *KeyStore) GetAccountType(account accounts.Account, passphrase string) (accounts.AccountType, error) {
+	_, unlockedKey, err := ks.getDecryptedKey(account, passphrase)
+	if err != nil {
+		return 0, nil
+	}
+
+	return getAccountTypeFromKey(unlockedKey)
+}
+
 func (ks *KeyStore) DeriveSessionAccount(account accounts.Account, derivationID []byte, basePassphrase, sessionPassphrase string) (accounts.Account, error) {
 	account, unlockedKey, err := ks.getDecryptedKey(account, basePassphrase)
 	if err != nil {
 		return accounts.Account{}, err
 	}
 
-	generatedKey, err := unlockedKey.DerivePrivate(derivationID)
-	if err != nil {
-		// Maybe we are deriving an hot wallet?
-		// generatedKey, err = unlockedKey.DerivePublic(derivationID)
-		// if errPub != nil {
-		// 	// We are deriving a session key, which is not possible
-		// 	return accounts.Account{}, errPub
-		// }
+	deriveKey := func() (Key, error) {
+		switch k := unlockedKey.(type) {
+		case *ColdKey:
+			return k.DerivePrivate(derivationID)
+		case *HotKey:
+			return k.DerivePublic(derivationID)
+		}
 
+		return nil, ErrNotDerivable
+	}
+
+	generatedKey, err := deriveKey()
+	if err != nil {
 		return accounts.Account{}, err
 	}
 
@@ -472,11 +501,6 @@ func (ks *KeyStore) Find(a accounts.Account) (accounts.Account, error) {
 	a, err := ks.cache.find(a)
 	ks.cache.mu.Unlock()
 	return a, err
-}
-
-func (ks *KeyStore) GetAccountType(a accounts.Account) (accounts.AccountType, error) {
-
-	return accounts.ColdAccount, nil
 }
 
 func (ks *KeyStore) getDecryptedKey(a accounts.Account, auth string) (accounts.Account, Key, error) {
