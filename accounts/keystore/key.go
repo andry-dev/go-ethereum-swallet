@@ -118,7 +118,7 @@ type encryptedHotKeyJSONV3 struct {
 	Address   string     `json:"address"`
 	PublicKey string     `json:"publickey"`
 	Crypto    CryptoJSON `json:"crypto"`
-	Id        string     `jsson:"id"`
+	Id        string     `json:"id"`
 	KeyType   int        `json:"keytype"`
 	Version   int        `json:"version"`
 }
