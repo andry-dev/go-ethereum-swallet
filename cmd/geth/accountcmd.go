@@ -24,6 +24,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/cmd/utils"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/internal/flags"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/urfave/cli/v2"
 )
@@ -200,6 +201,12 @@ changing your password is only possible interactively.
 					utils.KeyStoreDirFlag,
 					utils.PasswordFileFlag,
 					utils.LightKDFFlag,
+					&cli.StringFlag{
+						Name:        "type",
+						Category:    flags.AccountCategory,
+						Usage:       "Determines the type of the account for which the key should be imported. Possible values:\n\tcold, hot, session, hot-session",
+						DefaultText: "cold",
+					},
 				},
 				ArgsUsage: "<keyFile>",
 				Description: `
@@ -222,6 +229,15 @@ Note:
 As you can directly copy your encrypted accounts to another ethereum instance,
 this import mechanism is not needed when you transfer an account between
 nodes.
+
+
+ON ACCOUNT TYPES
+
+If the '--type' flag is used with any value different from 'cold' then the
+behaviour differs:
+
+When invoked with value 'session' then the given private key is assumed to be
+from a session account generated from a cold account.
 `,
 			},
 		},
