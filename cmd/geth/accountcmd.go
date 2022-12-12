@@ -23,6 +23,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/cmd/utils"
+	"github.com/ethereum/go-ethereum/console/prompt"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/internal/flags"
 	"github.com/ethereum/go-ethereum/log"
@@ -244,12 +245,27 @@ from a session account generated from a cold account.
 	}
 )
 
+func accountTypeToString(accountType accounts.AccountType) string {
+	switch accountType {
+	case accounts.ColdAccount:
+		return "Cold"
+	case accounts.HotAccount:
+		return "Hot"
+	case accounts.SessionAccount:
+		return "Session"
+	case accounts.HotSessionAccount:
+		return "Hot session"
+	}
+
+	return "Cold"
+}
+
 func accountList(ctx *cli.Context) error {
 	stack, _ := makeConfigNode(ctx)
 	var index int
 	for _, wallet := range stack.AccountManager().Wallets() {
 		for _, account := range wallet.Accounts() {
-			fmt.Printf("Account #%d: {%x} %s\n", index, account.Address, &account.URL)
+			fmt.Printf("Account #%d (%s): {%x} %s\n", index, accountTypeToString(account.Type), account.Address, &account.URL)
 			index++
 		}
 	}

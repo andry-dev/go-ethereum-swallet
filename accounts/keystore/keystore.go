@@ -294,18 +294,20 @@ func (ks *KeyStore) DeriveSessionAccount(account accounts.Account, derivationID 
 		return accounts.Account{}, err
 	}
 
-	deriveKey := func() (Key, error) {
+	deriveKey := func() (Key, accounts.AccountType, error) {
 		switch k := unlockedKey.(type) {
 		case *ColdKey:
-			return k.DerivePrivate(derivationID)
+			newKey, err := k.DerivePrivate(derivationID)
+			return newKey, accounts.SessionAccount, err
 		case *HotKey:
-			return k.DerivePublic(derivationID)
+			newKey, err := k.DerivePublic(derivationID)
+			return newKey, accounts.HotSessionAccount, err
 		}
 
-		return nil, ErrNotDerivable
+		return nil, 0, ErrNotDerivable
 	}
 
-	generatedKey, err := deriveKey()
+	generatedKey, accountType, err := deriveKey()
 	if err != nil {
 		return accounts.Account{}, err
 	}
@@ -316,6 +318,7 @@ func (ks *KeyStore) DeriveSessionAccount(account accounts.Account, derivationID 
 			Scheme: KeyStoreScheme,
 			Path:   ks.storage.JoinPath(keyFileName(generatedKey.Address(), generatedKey.PathIdentifier())),
 		},
+		Type: accountType,
 	}
 
 	// Create the session key
@@ -352,6 +355,7 @@ func (ks *KeyStore) GenerateHotWallet(coldAccount accounts.Account, coldPassphra
 			Scheme: KeyStoreScheme,
 			Path:   ks.storage.JoinPath(keyFileName(hotKey.Address(), hotKey.PathIdentifier())),
 		},
+		Type: accounts.HotAccount,
 	}
 
 	if err := ks.storage.StoreKey(hotAccount.URL.Path, hotKey, hotPassphrase); err != nil {

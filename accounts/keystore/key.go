@@ -309,7 +309,8 @@ func NewSessionKey(uuid uuid.UUID, address common.Address, privateKey *ecdsa.Pri
 // Creates a random ECDSA secret key from a master ECDSA secret key and an
 // identifier.
 // Effectively computes:
-//      sk = msk * id mod P
+//
+//	sk = msk * id mod P
 func RandSecretKey(masterSecretKey *ecdsa.PrivateKey, id *big.Int) (*ecdsa.PrivateKey, error) {
 	d := new(big.Int).Mul(masterSecretKey.D, id)
 	d.Mod(d, masterSecretKey.Params().N)
@@ -320,7 +321,8 @@ func RandSecretKey(masterSecretKey *ecdsa.PrivateKey, id *big.Int) (*ecdsa.Priva
 // Creates a random ECDSA public key from a master ECDSA public key and an
 // identifier.
 // Effectively computes:
-//      pk = mpk * id
+//
+//	pk = mpk * id
 func RandPublicKey(masterPublicKey *ecdsa.PublicKey, id *big.Int) *ecdsa.PublicKey {
 	pk := new(ecdsa.PublicKey)
 	pk.Curve = masterPublicKey.Curve
@@ -623,6 +625,7 @@ func storeNewKey(ks keyStore, rand io.Reader, auth string) (Key, accounts.Accoun
 	a := accounts.Account{
 		Address: key.address,
 		URL:     accounts.URL{Scheme: KeyStoreScheme, Path: ks.JoinPath(keyFileName(key.address, key.PathIdentifier()))},
+		Type:    accounts.ColdAccount,
 	}
 	if err := ks.StoreKey(a.URL.Path, key, auth); err != nil {
 		zeroKey(key.MasterPrivateKey)

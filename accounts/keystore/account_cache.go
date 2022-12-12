@@ -253,6 +253,7 @@ func (ac *accountCache) scanAccounts() error {
 		buf = new(bufio.Reader)
 		key struct {
 			Address string `json:"address"`
+			Type    int    `json:"keytype"`
 		}
 	)
 	readAccount := func(path string) *accounts.Account {
@@ -265,6 +266,7 @@ func (ac *accountCache) scanAccounts() error {
 		buf.Reset(fd)
 		// Parse the address.
 		key.Address = ""
+		key.Type = 0
 		err = json.NewDecoder(buf).Decode(&key)
 		addr := common.HexToAddress(key.Address)
 		switch {
@@ -276,6 +278,7 @@ func (ac *accountCache) scanAccounts() error {
 			return &accounts.Account{
 				Address: addr,
 				URL:     accounts.URL{Scheme: KeyStoreScheme, Path: path},
+				Type:    accounts.AccountType(key.Type),
 			}
 		}
 		return nil
