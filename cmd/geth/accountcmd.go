@@ -19,6 +19,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
@@ -303,28 +304,28 @@ func unlockAccount(ks *keystore.KeyStore, address string, i int, passwords []str
 
 func ambiguousAddrRecovery(ks *keystore.KeyStore, err *keystore.AmbiguousAddrError, auth string) accounts.Account {
 	fmt.Printf("Multiple key files exist for address %x:\n", err.Addr)
-	for _, a := range err.Matches {
-		fmt.Println("  ", a.URL)
-	}
-	fmt.Println("Testing your password against all of them...")
-	var match *accounts.Account
 	for i, a := range err.Matches {
-		if e := ks.Unlock(a, auth); e == nil {
-			match = &err.Matches[i]
-			break
-		}
+		fmt.Printf("  %v: %v\n", i, a.URL)
 	}
-	if match == nil {
-		utils.Fatalf("None of the listed files could be unlocked.")
+	selectedAccountStr, err2 := prompt.Stdin.Prompt(fmt.Sprintf("Please select which account you want to use [0-%d]: ", len(err.Matches)-1))
+	if err2 != nil {
+		utils.Fatalf("Failed with error: %v\n", err2)
+		return accounts.Account{}
+	}
+
+	selectedAccountIdx, err2 := strconv.Atoi(selectedAccountStr)
+
+	if err2 != nil {
+		utils.Fatalf("Failed with error: %v\n", err2)
+		return accounts.Account{}
+	}
+
+	var match *accounts.Account = &err.Matches[selectedAccountIdx]
+	if e := ks.Unlock(*match, auth); e != nil {
+		utils.Fatalf("Couldn't unlock account: %v\n", e)
 		return accounts.Account{}
 	}
 	fmt.Printf("Your password unlocked %s\n", match.URL)
-	fmt.Println("In order to avoid this warning, you need to remove the following duplicate key files:")
-	for _, a := range err.Matches {
-		if a != *match {
-			fmt.Println("  ", a.URL)
-		}
-	}
 	return *match
 }
 
