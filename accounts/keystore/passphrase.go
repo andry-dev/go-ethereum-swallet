@@ -256,8 +256,25 @@ func decryptHotKey(keyjson []byte, auth string) (*HotKey, error) {
 	}
 
 	id, err := uuid.Parse(k.Id)
+	if err != nil {
+		return nil, err
+	}
+
 	address, err := hex.DecodeString(k.Address)
-	publicKey, err := crypto.UnmarshalPubkey([]byte(k.PublicKey))
+	if err != nil {
+		return nil, err
+	}
+
+	pk, err := hex.DecodeString(k.PublicKey)
+	if err != nil {
+		return nil, err
+	}
+
+	publicKey, err := crypto.UnmarshalPubkey(pk)
+	if err != nil {
+		return nil, err
+	}
+
 	plaintext, err := DecryptDataV3(k.Crypto, auth)
 
 	if err != nil {
@@ -309,8 +326,24 @@ func decryptHotSessionKey(keyjson []byte, auth string) (*HotSessionKey, error) {
 	}
 
 	id, err := uuid.Parse(k.Id)
+	if err != nil {
+		return nil, err
+	}
+
 	address, err := hex.DecodeString(k.Address)
-	publicKey, err := crypto.UnmarshalPubkey([]byte(k.PublicKey))
+	if err != nil {
+		return nil, err
+	}
+
+	pk, err := hex.DecodeString(k.PublicKey)
+	if err != nil {
+		return nil, err
+	}
+
+	publicKey, err := crypto.UnmarshalPubkey(pk)
+	if err != nil {
+		return nil, err
+	}
 
 	if err != nil {
 		return nil, err
