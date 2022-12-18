@@ -85,6 +85,34 @@ func TestSign(t *testing.T) {
 	}
 }
 
+func TestSignSession(t *testing.T) {
+	_, ks := tmpKeyStore(t, true)
+
+	baseAccountPass := ""
+	a1, err := ks.NewAccount(baseAccountPass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ks.Unlock(a1, baseAccountPass); err != nil {
+		t.Fatal(err)
+	}
+
+	derivationID := []byte{1, 2, 3, 4}
+	sessionPass := ""
+	a2, err := ks.DeriveSessionAccount(a1, derivationID, baseAccountPass, sessionPass)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ks.Unlock(a2, sessionPass); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ks.SignHash(accounts.Account{Address: a2.Address}, testSigData); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSignWithPassphrase(t *testing.T) {
 	_, ks := tmpKeyStore(t, true)
 

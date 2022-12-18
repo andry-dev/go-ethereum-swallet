@@ -305,7 +305,7 @@ func unlockAccount(ks *keystore.KeyStore, address string, i int, passwords []str
 func ambiguousAddrRecovery(ks *keystore.KeyStore, err *keystore.AmbiguousAddrError, auth string) accounts.Account {
 	fmt.Printf("Multiple key files exist for address %x:\n", err.Addr)
 	for i, a := range err.Matches {
-		fmt.Printf("  %v: %v\n", i, a.URL)
+		fmt.Printf("  %v (%v): %v\n", i, accountTypeToString(a.Type), a.URL)
 	}
 	selectedAccountStr, err2 := prompt.Stdin.Prompt(fmt.Sprintf("Please select which account you want to use [0-%d]: ", len(err.Matches)-1))
 	if err2 != nil {
